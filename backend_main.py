@@ -25,7 +25,7 @@ if settings.DATABASE_URL.startswith("postgresql") or settings.DATABASE_URL.start
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
     
     # ถ้าจำเป็นต้องใช้ SSL (แนะนำให้ใส่ connect_args)
-    engine = create_async_engine(db_url, pool_size=5, max_overflow=0, connect_args={"ssl": "require"})
+    engine = create_async_engine(db_url, pool_size=5, max_overflow=0)
 else: # SQLite
     engine = create_async_engine(settings.DATABASE_URL)
 
