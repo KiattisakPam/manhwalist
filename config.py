@@ -1,13 +1,15 @@
+# ตัวอย่างโค้ดใน config.py (สมมติว่าคุณใช้ pydantic-settings)
+# (คุณอาจต้องติดตั้ง pydantic-settings ถ้ายังไม่ได้ติดตั้ง)
+
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # Pydantic จะอ่านค่านี้จาก Environment Variable ก่อน
-    # ถ้าไม่เจอ จะอ่านจากไฟล์ .env ที่เราสร้างไว้
-    DATABASE_URL: str
+    # 'DATABASE_URL' จะถูกอ่านจาก Environment Variable ในระบบโฮสต์
+    # ถ้าไม่มีค่า (เช่น รันบนเครื่อง local โดยไม่มี .env) จะใช้ค่า default
+    DATABASE_URL: str 
 
     class Config:
-        env_file = ".env"
+        env_file = ".env" # สามารถเพิ่มการอ่านจาก .env ใน Local ได้
 
-# สร้าง instance ของ Settings เพื่อให้ไฟล์อื่นเรียกใช้ได้
 settings = Settings()
 

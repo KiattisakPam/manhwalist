@@ -10,15 +10,18 @@ import sqlalchemy
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-# --- Import การตั้งค่าใหม่ ---
+# --- Import การตั้งค่า ---
 from config import settings
 
 # --- Database Connection ---
-engine = create_async_engine(
-    settings.DATABASE_URL, 
-    pool_size=5, 
-    max_overflow=0
-)
+# ตรวจสอบว่าเป็น PostgreSQL หรือ SQLite แล้วสร้าง Engine ให้เหมาะสม
+if settings.DATABASE_URL.startswith("postgresql"):
+    # เพิ่ม +asyncpg เข้าไปใน URL สำหรับ SQLAlchemy
+    db_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    engine = create_async_engine(db_url, pool_size=5, max_overflow=0)
+else: # SQLite
+    engine = create_async_engine(settings.DATABASE_URL)
+
 metadata = sqlalchemy.MetaData()
 
 # --- SQLAlchemy Table Definitions ---
@@ -212,14 +215,15 @@ async def upload_image(file: UploadFile = File(...)):
     base_name = os.path.splitext(file.filename)[0].replace(' ', '_').encode('ascii', 'ignore').decode('ascii')
     extension = os.path.splitext(file.filename)[1]
     new_file_name = f"cover_{timestamp}_{base_name}{extension}"
-    file_path = os.path.join(COVERS_DIR, new_file_name)
+    file_path = os.path.join("covers", new_file_name)
+    os.makedirs("covers", exist_ok=True)
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
     return {"file_name": new_file_name}
 
 @app.get("/covers/{file_name}")
 async def get_cover_image(file_name: str):
-    file_path = os.path.join(COVERS_DIR, file_name)
+    file_path = os.path.join("covers", file_name)
     if os.path.exists(file_path):
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="Image not found")
@@ -389,5 +393,4 @@ async def delete_program(program_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(query)
     await db.commit()
     return {"message": "Program deleted"}
-
 
