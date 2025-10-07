@@ -15,10 +15,17 @@ from config import settings
 
 # --- Database Connection ---
 # ตรวจสอบว่าเป็น PostgreSQL หรือ SQLite แล้วสร้าง Engine ให้เหมาะสม
-if settings.DATABASE_URL.startswith("postgresql"):
+if settings.DATABASE_URL.startswith("postgresql") or settings.DATABASE_URL.startswith("postgres"):
     # เพิ่ม +asyncpg เข้าไปใน URL สำหรับ SQLAlchemy
-    db_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-    engine = create_async_engine(db_url, pool_size=5, max_overflow=0)
+    
+    # 1. แทนที่ postgres:// ด้วย postgresql://
+    db_url = settings.DATABASE_URL.replace("postgres://", "postgresql://") 
+
+    # 2. เพิ่ม +asyncpg เข้าไป
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+    
+    # ถ้าจำเป็นต้องใช้ SSL (แนะนำให้ใส่ connect_args)
+    engine = create_async_engine(db_url, pool_size=5, max_overflow=0, connect_args={"ssl": "require"})
 else: # SQLite
     engine = create_async_engine(settings.DATABASE_URL)
 
