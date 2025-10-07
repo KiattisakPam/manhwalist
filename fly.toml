@@ -1,0 +1,15 @@
+app = "manhwalist-backend-fly" # ตั้งชื่อ App ของคุณ
+
+[[services]]
+  internal_port = 8080 # Port ภายในที่ Gunicorn รัน (ต้องตรงกับ ENV PORT ใน Dockerfile)
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+  
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+    
