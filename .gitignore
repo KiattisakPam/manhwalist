@@ -1,4 +1,10 @@
+# .gitignore
+
 __pycache__/
 .env
 *.db
 *.db-journal
+firebase-service-account.json
+/covers/
+/job_files/
+

@@ -22,5 +22,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app
 
 # Command ที่จะรันเมื่อ Container เริ่มทำงาน
-CMD gunicorn backend_main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
-
+CMD gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT

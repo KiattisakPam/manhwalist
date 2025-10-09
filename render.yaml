@@ -1,0 +1,26 @@
+# render.yaml (ไฟล์สำหรับ One-Click Deploy)
+services:
+  # 1. PostgreSQL Database Service (Free Tier)
+  - type: pserv
+    name: manhwa-db-clone
+    plan: free # เลือก Free Tier
+    databaseName: manhwa_clone_db
+    # ตั้งค่า User/Password (สามารถเปลี่ยนค่าเริ่มต้นได้)
+    user: renderuser
+    postgres:
+      version: 14
+
+  # 2. FastAPI Web Service (Backend)
+  - type: web
+    name: manhwalist-backend-clone
+    plan: free # เลือก Free Tier
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    # เชื่อมต่อกับ Database ภายในที่สร้างขึ้นอัตโนมัติ
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: manhwa-db-clone
+          property: connectionString
+          
