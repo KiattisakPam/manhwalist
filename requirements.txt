@@ -2,6 +2,7 @@ fastapi
 uvicorn
 SQLAlchemy
 asyncpg
+psycopg2-binary
 pydantic-settings
 python-multipart
 a2wsgi
