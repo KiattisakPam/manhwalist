@@ -8,8 +8,14 @@ from config import settings
 db_url = settings.DATABASE_URL
 if db_url.startswith("sqlite"):
     db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
-elif db_url.startswith("postgres"):
-    db_url = db_url.replace("postgres://", "postgresql+asyncpg://")
+
+# *** แก้ไข Logic ตรงนี้ ***
+if db_url.startswith("postgres"):
+    # บังคับใช้ postgresql+asyncpg:// สำหรับ URI ที่ขึ้นต้นด้วย postgres หรือ postgresql
+    if not db_url.startswith("postgresql+asyncpg://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+        db_url = db_url.replace("postgres://", "postgresql+asyncpg://")
+# *** สิ้นสุดการแก้ไข ***
 
 engine = create_async_engine(db_url, connect_args={"check_same_thread": False} if "sqlite" in db_url else {})
 metadata = sqlalchemy.MetaData()
