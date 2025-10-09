@@ -42,7 +42,7 @@ app.include_router(notificationsRouter.router)
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
-        await conn.run_sync(metadata.create_all)
+        await conn.run_sync(metadata.create_all, checkfirst=True)
     
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with async_session() as session:
