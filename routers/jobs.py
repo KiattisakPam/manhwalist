@@ -133,14 +133,36 @@ async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = D
     if not employee_profile:
         raise HTTPException(status_code=404, detail="Employee profile not found")
 
-    # --- แก้ไข Query ให้ดึง is_revision มาด้วย ---
-    jobs_res = await db.execute(
-        sqlalchemy.select(jobs, comics.c.title.label("comic_title"), comics.c.image_file.label("comic_image_file"))
+    # --- แก้ไข Query ตรงนี้ให้ชัดเจนขึ้น ---
+    # ระบุทุกคอลัมน์ที่ต้องการเลือกออกมาจากตาราง jobs โดยตรง
+    # แทนการใช้ `jobs` ทั้งตาราง
+    jobs_query = (
+        sqlalchemy.select(
+            jobs.c.id,
+            jobs.c.comic_id,
+            jobs.c.employee_id,
+            jobs.c.episode_number,
+            jobs.c.task_type,
+            jobs.c.rate,
+            jobs.c.status,
+            jobs.c.assigned_date,
+            jobs.c.completed_date,
+            jobs.c.employer_work_file,
+            jobs.c.employee_finished_file,
+            jobs.c.telegram_link,
+            jobs.c.payroll_id,
+            jobs.c.is_revision,
+            comics.c.title.label("comic_title"),
+            comics.c.image_file.label("comic_image_file")
+        )
         .join(comics, jobs.c.comic_id == comics.c.id)
         .where(jobs.c.employee_id == employee_profile['id'])
         .order_by(jobs.c.assigned_date.desc())
     )
+    jobs_res = await db.execute(jobs_query)
+    # ------------------------------------
     return jobs_res.mappings().all()
+
 
 @router.put("/{job_id}/request-revision", status_code=200)
 async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
