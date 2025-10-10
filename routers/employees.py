@@ -18,10 +18,12 @@ router = APIRouter(
 )
 
 @router.get("/")
-async def get_all_employees(db: AsyncSession = Depends(get_db)):
-    query = sqlalchemy.select(employees).order_by(employees.c.name)
+async def get_all_employees(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # --- แก้ไข Query ให้กรองข้อมูลเฉพาะของ employer ที่ login อยู่ ---
+    query = sqlalchemy.select(employees).where(employees.c.employer_id == current_user.id).order_by(employees.c.name)
     result = await db.execute(query)
     return result.mappings().all()
+
 
 async def _get_summary_logic(employee_id: int, db: AsyncSession):
     query = sqlalchemy.select(

@@ -22,6 +22,7 @@ router = APIRouter(
 
 @router.get("/all/", response_model=List[JobWithComicInfo])
 async def get_all_jobs(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # --- แก้ไข Query ให้กรองข้อมูลเฉพาะของ employer ที่ login อยู่ ---
     query = sqlalchemy.select(
         jobs,
         employees.c.name.label("employee_name"),
@@ -30,9 +31,10 @@ async def get_all_jobs(db: AsyncSession = Depends(get_db), current_user: User = 
     ).select_from(
         jobs.join(employees, jobs.c.employee_id == employees.c.id)\
             .join(comics, jobs.c.comic_id == comics.c.id)
-    ).order_by(sqlalchemy.desc(jobs.c.assigned_date))
+    ).where(comics.c.employer_id == current_user.id).order_by(sqlalchemy.desc(jobs.c.assigned_date)) # <<< เพิ่ม .where()
     result = await db.execute(query)
     return result.mappings().all()
+
 
 @router.post("/", status_code=201)
 async def create_job(
@@ -46,6 +48,19 @@ async def create_job(
     telegram_link: Optional[str] = Form(None),
     work_file: UploadFile = File(...)
 ):
+    
+    # --- เพิ่ม Logic ตรวจสอบความเป็นเจ้าของก่อนสร้าง ---
+    comic_res = await db.execute(sqlalchemy.select(comics).where(comics.c.id == comic_id))
+    comic = comic_res.mappings().first()
+    if not comic or comic.employer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Comic not found or not owned by user")
+
+    employee_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
+    employee = employee_res.mappings().first()
+    if not employee or employee.employer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Employee not found or not owned by user")
+    # ---------------------------------------------
+        
     os.makedirs("job_files", exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     file_name = f"emp_{timestamp}_ep{episode_number}_{work_file.filename}"

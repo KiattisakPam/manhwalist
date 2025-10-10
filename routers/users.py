@@ -10,6 +10,7 @@ from database import get_db
 from models import users, employees
 from schemas import Token, User
 import auth
+from config import settings
 
 router = APIRouter(
     tags=["Users and Authentication"]
@@ -26,6 +27,41 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     user_model = User.model_validate(user)
     return {"access_token": access_token, "token_type": "bearer", "user": user_model}
 
+
+@router.post("/register/employer", status_code=201, response_model=User)
+async def register_employer(
+    email: str = Form(...),
+    password: str = Form(...),
+    invitation_code: str = Form(...), # <<< เพิ่ม Field นี้
+    db: AsyncSession = Depends(get_db)
+):
+    # --- เพิ่ม Logic ตรวจสอบรหัสเชิญ ---
+    if invitation_code != settings.INVITATION_CODE:
+        raise HTTPException(status_code=403, detail="Invalid invitation code")
+    # ------------------------------------
+        
+    if await auth.get_user_from_db(db, email=email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_password = auth.get_password_hash(password)
+    
+    insert_query = sqlalchemy.insert(users).values(
+        email=email,
+        hashed_password=hashed_password,
+        role="employer"
+    )
+    result = await db.execute(insert_query)
+    await db.commit()
+
+    created_user = {
+        "id": result.inserted_primary_key[0],
+        "email": email,
+        "role": "employer"
+    }
+    return created_user
+
+
+
 @router.post("/users/employee", status_code=201)
 async def create_employee_user(
     name: str = Form(...), 
@@ -40,7 +76,13 @@ async def create_employee_user(
     hashed_password = auth.get_password_hash(password)
     
     user_res = await db.execute(sqlalchemy.insert(users).values(email=email, hashed_password=hashed_password, role="employee"))
-    await db.execute(sqlalchemy.insert(employees).values(name=name, user_id=user_res.inserted_primary_key[0]))
+    
+    # --- แก้ไข Query ให้เพิ่ม employer_id ตอนสร้าง ---
+    await db.execute(sqlalchemy.insert(employees).values(
+        name=name, 
+        user_id=user_res.inserted_primary_key[0],
+        employer_id=current_user.id # <<< เพิ่ม employer_id
+    ))
     
     await db.commit()
     return {"message": "Employee created successfully"}

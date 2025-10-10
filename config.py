@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     # 'DATABASE_URL' จะถูกอ่านจาก Environment Variable ในระบบโฮสต์
     # ถ้าไม่มีค่า (เช่น รันบนเครื่อง local โดยไม่มี .env) จะใช้ค่า default
     DATABASE_URL: str 
+    # --- เพิ่มบรรทัดนี้ ---
+    INVITATION_CODE: str = "DEFAULT_SECRET_CHANGE_ME"
 
     class Config:
         env_file = ".env" # สามารถเพิ่มการอ่านจาก .env ใน Local ได้

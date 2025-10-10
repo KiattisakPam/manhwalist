@@ -15,7 +15,8 @@ from routers import (
     employees as employeesRouter,
     programs as programsRouter,
     files as filesRouter,
-    notifications as notificationsRouter
+    notifications as notificationsRouter,
+    settings as settingsRouter
 )
 
 app = FastAPI(title="Comic Secretary API")
@@ -37,6 +38,7 @@ app.include_router(employeesRouter.router)
 app.include_router(programsRouter.router)
 app.include_router(filesRouter.router)
 app.include_router(notificationsRouter.router)
+app.include_router(settingsRouter.router)
 
 # --- Event Handlers ---
 @app.on_event("startup")

@@ -1,5 +1,3 @@
-# routers/comics.py
-
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
@@ -9,7 +7,7 @@ import shutil
 from typing import List
 
 from database import get_db
-from models import comics, jobs, employees
+from models import comics, jobs
 from schemas import ComicCreate, ComicWithCompletion, ComicUpdate, EpisodeStatus, User
 import auth
 
@@ -18,6 +16,7 @@ router = APIRouter(
     tags=["Comics"],
     dependencies=[Depends(auth.get_current_user)]
 )
+
 
 @router.post("/upload-image/", tags=["Files"])
 async def upload_image(file: UploadFile = File(...), current_user: User = Depends(auth.get_current_employer_user)):
@@ -30,15 +29,16 @@ async def upload_image(file: UploadFile = File(...), current_user: User = Depend
     return {"file_name": new_file_name}
 
 @router.get("/", response_model=List[ComicWithCompletion])
-async def get_all_comics(db: AsyncSession = Depends(get_db)):
-    comics_query = sqlalchemy.select(comics).order_by(comics.c.id.desc())
+async def get_all_comics(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # --- แก้ไข Query ให้กรองข้อมูลเฉพาะของ employer ที่ login อยู่ ---
+    comics_query = sqlalchemy.select(comics).where(comics.c.employer_id == current_user.id).order_by(comics.c.id.desc())
     comics_result = await db.execute(comics_query)
     comics_list = comics_result.mappings().all()
 
     response_list = []
     for comic in comics_list:
         completion_query = sqlalchemy.select(sqlalchemy.func.max(jobs.c.episode_number))\
-            .where(jobs.c.comic_id == comic.id, jobs.c.status == "COMPLETED")
+            .where(jobs.c.comic_id == comic.id, jobs.c.status.in_(["COMPLETED", "ARCHIVED"]))
         latest_completed_ep = await db.scalar(completion_query)
         
         comic_data = dict(comic)
@@ -50,8 +50,10 @@ async def get_all_comics(db: AsyncSession = Depends(get_db)):
 @router.post("/", status_code=201)
 async def create_comic(comic: ComicCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
     now = datetime.datetime.now().isoformat()
+    # --- แก้ไข Query ให้เพิ่ม employer_id ตอนสร้าง ---
     query = sqlalchemy.insert(comics).values(
         **comic.model_dump(),
+        employer_id=current_user.id, # <<< เพิ่ม employer_id
         last_updated_date=now,
         status_change_date=now
     )
@@ -60,12 +62,19 @@ async def create_comic(comic: ComicCreate, db: AsyncSession = Depends(get_db), c
     return {"id": result.inserted_primary_key[0], **comic.model_dump()}
 
 @router.get("/{comic_id}/")
-async def get_comic_by_id(comic_id: int, db: AsyncSession = Depends(get_db)):
-    query = sqlalchemy.select(comics).where(comics.c.id == comic_id)
+async def get_comic_by_id(comic_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # --- แก้ไข Query ให้กรองข้อมูลเฉพาะของ employer ที่ login อยู่ ---
+    query = sqlalchemy.select(comics).where(
+        sqlalchemy.and_(
+            comics.c.id == comic_id, 
+            comics.c.employer_id == current_user.id
+        )
+    )
     comic = (await db.execute(query)).mappings().first()
     if not comic:
-        raise HTTPException(status_code=404, detail="Comic not found")
+        raise HTTPException(status_code=404, detail="Comic not found or not accessible")
     return comic
+
 
 @router.get("/{comic_id}/episodes/", response_model=List[EpisodeStatus])
 async def get_comic_episode_statuses(comic_id: int, db: AsyncSession = Depends(get_db)):
@@ -108,6 +117,16 @@ async def get_comic_episode_statuses(comic_id: int, db: AsyncSession = Depends(g
 
 @router.put("/{comic_id}/")
 async def update_comic(comic_id: int, comic_update: ComicUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # --- เพิ่ม Logic ตรวจสอบความเป็นเจ้าของก่อนแก้ไข ---
+    comic_to_update_res = await db.execute(sqlalchemy.select(comics).where(comics.c.id == comic_id))
+    comic_to_update = comic_to_update_res.mappings().first()
+
+    if not comic_to_update:
+        raise HTTPException(status_code=404, detail="Comic not found")
+    if comic_to_update.employer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this comic")
+    # ---------------------------------------------
+        
     update_data = comic_update.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")

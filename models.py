@@ -13,6 +13,9 @@ users = sqlalchemy.Table(
 comics = sqlalchemy.Table(
     "comics", metadata,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    # --- เพิ่ม employer_id ---
+    sqlalchemy.Column("employer_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    # -------------------------
     sqlalchemy.Column("title", sqlalchemy.String, nullable=False),
     sqlalchemy.Column("synopsis", sqlalchemy.String),
     sqlalchemy.Column("read_link", sqlalchemy.String),
@@ -34,9 +37,13 @@ comics = sqlalchemy.Table(
 employees = sqlalchemy.Table(
     "employees", metadata,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    # --- เพิ่ม employer_id ---
+    sqlalchemy.Column("employer_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    # -------------------------
     sqlalchemy.Column("name", sqlalchemy.String, nullable=False, unique=True),
     sqlalchemy.Column("user_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE")),
 )
+
 
 jobs = sqlalchemy.Table(
     "jobs", metadata,
@@ -53,12 +60,11 @@ jobs = sqlalchemy.Table(
     sqlalchemy.Column("employee_finished_file", sqlalchemy.String),
     sqlalchemy.Column("telegram_link", sqlalchemy.String),
     sqlalchemy.Column("payroll_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("payrolls.id"), nullable=True),
-    # --- เพิ่มบรรทัดนี้ ---
     sqlalchemy.Column("is_revision", sqlalchemy.Boolean, default=False, nullable=False),
 )
 
 
-# --- เพิ่มตารางนี้เข้าไป ---
+
 fcm_devices = sqlalchemy.Table(
     "fcm_devices", metadata,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
@@ -66,7 +72,7 @@ fcm_devices = sqlalchemy.Table(
     sqlalchemy.Column("device_token", sqlalchemy.String, unique=True, nullable=False),
     sqlalchemy.Column("is_active", sqlalchemy.Boolean, default=True),
 )
-# -------------------------
+
 
 payrolls = sqlalchemy.Table(
     "payrolls", metadata,
@@ -83,4 +89,5 @@ programs = sqlalchemy.Table(
     sqlalchemy.Column("name", sqlalchemy.String, nullable=False),
     sqlalchemy.Column("path", sqlalchemy.String, nullable=False),
 )
+
 
