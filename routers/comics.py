@@ -7,7 +7,7 @@ import shutil
 from typing import List
 
 from database import get_db
-from models import comics, jobs
+from models import comics, jobs, employees
 from schemas import ComicCreate, ComicWithCompletion, ComicUpdate, EpisodeStatus, User
 import auth
 
@@ -16,6 +16,7 @@ router = APIRouter(
     tags=["Comics"],
     dependencies=[Depends(auth.get_current_user)]
 )
+
 
 
 @router.post("/upload-image/", tags=["Files"])
@@ -75,16 +76,15 @@ async def get_comic_by_id(comic_id: int, db: AsyncSession = Depends(get_db), cur
         raise HTTPException(status_code=404, detail="Comic not found or not accessible")
     return comic
 
-
 @router.get("/{comic_id}/episodes/", response_model=List[EpisodeStatus])
 async def get_comic_episode_statuses(comic_id: int, db: AsyncSession = Depends(get_db)):
+    # --- (ส่วนตรวจสอบ comic เหมือนเดิม) ---
     comic_res = await db.execute(sqlalchemy.select(comics.c.id).where(comics.c.id == comic_id))
     comic = comic_res.mappings().first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
 
-    # --- แก้ไข Query ทั้งหมด ---
-    # ดึง "งาน" ทั้งหมดที่เกี่ยวกับการ์ตูนเรื่องนี้ ไม่ใช่สถานะตอน
+    # --- แก้ไข Query ตรงนี้ให้เสถียรขึ้น ---
     jobs_query = (
         sqlalchemy.select(
             jobs.c.episode_number,
@@ -94,13 +94,15 @@ async def get_comic_episode_statuses(comic_id: int, db: AsyncSession = Depends(g
             jobs.c.employee_finished_file,
             jobs.c.task_type
         )
-        .join(employees, jobs.c.employee_id == employees.c.id)
+        # ระบุตารางที่จะ Join ให้ชัดเจนขึ้น และใช้ LEFT OUTER JOIN (isouter=True)
+        .select_from(jobs.join(employees, jobs.c.employee_id == employees.c.id, isouter=True))
         .where(jobs.c.comic_id == comic_id)
         .order_by(jobs.c.episode_number)
     )
+    # ------------------------------------
+    
     jobs_result = await db.execute(jobs_query)
     
-    # ส่งข้อมูล "งาน" ทั้งหมดกลับไปให้ Frontend จัดการ
     all_jobs_for_comic = [
         EpisodeStatus(
             episode_number=j.episode_number,
