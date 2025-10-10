@@ -27,29 +27,31 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     user_model = User.model_validate(user)
     return {"access_token": access_token, "token_type": "bearer", "user": user_model}
 
-
 @router.post("/register/employer", status_code=201, response_model=User)
 async def register_employer(
     email: str = Form(...),
     password: str = Form(...),
-    invitation_code: str = Form(...), # <<< เพิ่ม Field นี้
+    invitation_code: str = Form(...),
     db: AsyncSession = Depends(get_db)
 ):
-    # --- เพิ่ม Logic ตรวจสอบรหัสเชิญ ---
     if invitation_code != settings.INVITATION_CODE:
         raise HTTPException(status_code=403, detail="Invalid invitation code")
-    # ------------------------------------
         
     if await auth.get_user_from_db(db, email=email):
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # --- ส่วนที่แก้ไข ---
+    # 1. ทำการเข้ารหัสรหัสผ่านก่อน
     hashed_password = auth.get_password_hash(password)
     
+    # 2. นำรหัสผ่านที่เข้ารหัสแล้ว (hashed_password) ไปบันทึก
     insert_query = sqlalchemy.insert(users).values(
         email=email,
-        hashed_password=hashed_password,
+        hashed_password=hashed_password, 
         role="employer"
     )
+    # -------------------
+
     result = await db.execute(insert_query)
     await db.commit()
 
@@ -59,6 +61,31 @@ async def register_employer(
         "role": "employer"
     }
     return created_user
+
+
+@router.post("/users/employee", status_code=201)
+async def create_employee_user(
+    name: str = Form(...), 
+    email: str = Form(...),
+    password: str = Form(...),
+    db: AsyncSession = Depends(get_db), 
+    current_user: User = Depends(auth.get_current_employer_user)
+):
+    if await auth.get_user_from_db(db, email=email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_password = auth.get_password_hash(password)
+    
+    user_res = await db.execute(sqlalchemy.insert(users).values(email=email, hashed_password=hashed_password, role="employee"))
+    
+    await db.execute(sqlalchemy.insert(employees).values(
+        name=name, 
+        user_id=user_res.inserted_primary_key[0],
+        employer_id=current_user.id
+    ))
+    
+    await db.commit()
+    return {"message": "Employee created successfully"}
 
 
 

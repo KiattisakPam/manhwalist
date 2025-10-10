@@ -19,10 +19,32 @@ router = APIRouter(
 
 @router.get("/")
 async def get_all_employees(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
-    # --- แก้ไข Query ให้กรองข้อมูลเฉพาะของ employer ที่ login อยู่ ---
-    query = sqlalchemy.select(employees).where(employees.c.employer_id == current_user.id).order_by(employees.c.name)
+    # --- นำเงื่อนไข is_active ออก ---
+    query = sqlalchemy.select(employees).where(
+        employees.c.employer_id == current_user.id
+    ).order_by(employees.c.name)
     result = await db.execute(query)
     return result.mappings().all()
+
+@router.delete("/{employee_id}", status_code=200)
+async def delete_employee(employee_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # 1. ค้นหาข้อมูลพนักงานเพื่อเอา user_id
+    emp_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
+    employee = emp_res.mappings().first()
+    if not employee or employee.employer_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Employee not found or not accessible")
+
+    user_id_to_delete = employee.user_id
+
+    # 2. ทำการลบข้อมูลออกจากตาราง 'users'
+    # (ข้อมูลใน employees, jobs, payrolls ที่ผูกกับ user_id นี้จะถูกลบตามไปด้วยเพราะ ON DELETE CASCADE)
+    delete_query = sqlalchemy.delete(users).where(users.c.id == user_id_to_delete)
+    await db.execute(delete_query)
+    
+    await db.commit()
+    return {"message": "Employee and all associated data have been permanently deleted."}
+
+
 
 
 async def _get_summary_logic(employee_id: int, db: AsyncSession):
