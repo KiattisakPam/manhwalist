@@ -1,7 +1,6 @@
 import sqlalchemy
 from database import metadata
 
-# --- SQLAlchemy Table Definitions ---
 users = sqlalchemy.Table(
     "users", metadata,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
@@ -13,9 +12,7 @@ users = sqlalchemy.Table(
 comics = sqlalchemy.Table(
     "comics", metadata,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
-    # --- เพิ่ม employer_id ---
     sqlalchemy.Column("employer_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
-    # -------------------------
     sqlalchemy.Column("title", sqlalchemy.String, nullable=False),
     sqlalchemy.Column("synopsis", sqlalchemy.String),
     sqlalchemy.Column("read_link", sqlalchemy.String),
@@ -37,13 +34,10 @@ comics = sqlalchemy.Table(
 employees = sqlalchemy.Table(
     "employees", metadata,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
-    # --- เพิ่ม employer_id ---
     sqlalchemy.Column("employer_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
-    # -------------------------
     sqlalchemy.Column("name", sqlalchemy.String, nullable=False, unique=True),
     sqlalchemy.Column("user_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE")),
 )
-
 
 jobs = sqlalchemy.Table(
     "jobs", metadata,
@@ -61,9 +55,9 @@ jobs = sqlalchemy.Table(
     sqlalchemy.Column("telegram_link", sqlalchemy.String),
     sqlalchemy.Column("payroll_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("payrolls.id"), nullable=True),
     sqlalchemy.Column("is_revision", sqlalchemy.Boolean, default=False, nullable=False),
+    sqlalchemy.Column("supplemental_file", sqlalchemy.String),
+    sqlalchemy.Column("supplemental_file_comment", sqlalchemy.String),
 )
-
-
 
 fcm_devices = sqlalchemy.Table(
     "fcm_devices", metadata,
@@ -72,7 +66,6 @@ fcm_devices = sqlalchemy.Table(
     sqlalchemy.Column("device_token", sqlalchemy.String, unique=True, nullable=False),
     sqlalchemy.Column("is_active", sqlalchemy.Boolean, default=True),
 )
-
 
 payrolls = sqlalchemy.Table(
     "payrolls", metadata,
@@ -88,6 +81,46 @@ programs = sqlalchemy.Table(
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column("name", sqlalchemy.String, nullable=False),
     sqlalchemy.Column("path", sqlalchemy.String, nullable=False),
+)
+
+
+job_supplemental_files = sqlalchemy.Table(
+    "job_supplemental_files", metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("job_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True),
+    sqlalchemy.Column("file_name", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("comment", sqlalchemy.String),
+    sqlalchemy.Column("uploaded_at", sqlalchemy.String, nullable=False),
+)
+
+
+chat_rooms = sqlalchemy.Table(
+    "chat_rooms", metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("employer_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    sqlalchemy.Column("employee_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False),
+    # job_id สามารถเป็น null ได้ ถ้าเป็นแชททั่วไป
+    sqlalchemy.Column("job_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True),
+    sqlalchemy.Column("created_at", sqlalchemy.String, nullable=False),
+)
+
+chat_messages = sqlalchemy.Table(
+    "chat_messages", metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("room_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False),
+    sqlalchemy.Column("sender_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    sqlalchemy.Column("message_type", sqlalchemy.String, nullable=False, default="text"), # text, image, file
+    sqlalchemy.Column("content", sqlalchemy.String, nullable=False), # ถ้าเป็น text ก็คือข้อความ, ถ้าเป็น file ก็คือ file_name
+    sqlalchemy.Column("sent_at", sqlalchemy.String, nullable=False),
+)
+
+chat_read_status = sqlalchemy.Table(
+    "chat_read_status", metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("room_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False),
+    sqlalchemy.Column("user_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    sqlalchemy.Column("last_read_message_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("chat_messages.id", ondelete="SET NULL")),
+    sqlalchemy.UniqueConstraint('room_id', 'user_id', name='uq_room_user_read_status')
 )
 
 

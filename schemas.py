@@ -100,5 +100,38 @@ class Program(BaseModel):
     name: str
     path: str
     
+class JobSupplementalFile(BaseModel):
+    id: int
+    job_id: int
+    file_name: str
+    comment: Optional[str] = None
+    uploaded_at: str
+
+# --- เพิ่ม Model ใหม่สำหรับแชท ---
+class ChatRoomCreate(BaseModel):
+    participant_employee_id: int
+    job_id: Optional[int] = None
     
+    
+class ChatMessage(BaseModel):
+    id: int
+    room_id: int
+    sender_id: int
+    message_type: str
+    content: str
+    sent_at: str
+
+class ChatRoomInfo(BaseModel):
+    id: int
+    participant_name: str
+    participant_role: str
+    job_id: Optional[int] = None 
+    job_context: Optional[str] = None # <<< เพิ่ม job_context
+    last_message: Optional[str] = None
+    last_message_time: Optional[str] = None
+    unread_count: int = 0
+
+class ChatRoomListResponse(BaseModel):
+    total_unread_count: int
+    rooms: List[ChatRoomInfo]
     

@@ -1,5 +1,3 @@
-# backend/routers/users.py
-
 from fastapi import APIRouter, Depends, HTTPException, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +25,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     user_model = User.model_validate(user)
     return {"access_token": access_token, "token_type": "bearer", "user": user_model}
 
+
 @router.post("/register/employer", status_code=201, response_model=User)
 async def register_employer(
     email: str = Form(...),
@@ -40,17 +39,13 @@ async def register_employer(
     if await auth.get_user_from_db(db, email=email):
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # --- ส่วนที่แก้ไข ---
-    # 1. ทำการเข้ารหัสรหัสผ่านก่อน
     hashed_password = auth.get_password_hash(password)
     
-    # 2. นำรหัสผ่านที่เข้ารหัสแล้ว (hashed_password) ไปบันทึก
     insert_query = sqlalchemy.insert(users).values(
         email=email,
         hashed_password=hashed_password, 
         role="employer"
     )
-    # -------------------
 
     result = await db.execute(insert_query)
     await db.commit()
@@ -87,30 +82,50 @@ async def create_employee_user(
     await db.commit()
     return {"message": "Employee created successfully"}
 
-
-
-@router.post("/users/employee", status_code=201)
-async def create_employee_user(
-    name: str = Form(...), 
+@router.put("/employee/{employee_id}/details", status_code=200)
+async def update_employee_details(
+    employee_id: int,
+    name: str = Form(...),
     email: str = Form(...),
-    password: str = Form(...),
-    db: AsyncSession = Depends(get_db), 
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(auth.get_current_employer_user)
 ):
-    if await auth.get_user_from_db(db, email=email):
-        raise HTTPException(status_code=400, detail="Email already registered")
+    emp_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
+    employee = emp_res.mappings().first()
+    if not employee or employee.employer_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    user_res = await db.execute(sqlalchemy.select(users).where(users.c.id == employee.user_id))
+    user = user_res.mappings().first()
+
+    if email != user.email:
+        existing_user = await auth.get_user_from_db(db, email)
+        if existing_user:
+            raise HTTPException(status_code=400, detail="New email is already in use")
     
-    hashed_password = auth.get_password_hash(password)
-    
-    user_res = await db.execute(sqlalchemy.insert(users).values(email=email, hashed_password=hashed_password, role="employee"))
-    
-    # --- แก้ไข Query ให้เพิ่ม employer_id ตอนสร้าง ---
-    await db.execute(sqlalchemy.insert(employees).values(
-        name=name, 
-        user_id=user_res.inserted_primary_key[0],
-        employer_id=current_user.id # <<< เพิ่ม employer_id
-    ))
+    await db.execute(sqlalchemy.update(employees).where(employees.c.id == employee_id).values(name=name))
+    await db.execute(sqlalchemy.update(users).where(users.c.id == employee.user_id).values(email=email))
     
     await db.commit()
-    return {"message": "Employee created successfully"}
+    return {"message": "Employee details updated successfully"}
+
+
+@router.put("/employee/{employee_id}/password", status_code=200)
+async def change_employee_password(
+    employee_id: int,
+    new_password: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(auth.get_current_employer_user)
+):
+    emp_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
+    employee = emp_res.mappings().first()
+    if not employee or employee.employer_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    hashed_password = auth.get_password_hash(new_password)
+    
+    await db.execute(sqlalchemy.update(users).where(users.c.id == employee.user_id).values(hashed_password=hashed_password))
+    
+    await db.commit()
+    return {"message": "Employee password updated successfully"}
 

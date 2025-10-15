@@ -16,7 +16,8 @@ from routers import (
     programs as programsRouter,
     files as filesRouter,
     notifications as notificationsRouter,
-    settings as settingsRouter
+    settings as settingsRouter,
+    chat as chatRouter
 )
 
 app = FastAPI(title="Comic Secretary API")
@@ -39,6 +40,7 @@ app.include_router(programsRouter.router)
 app.include_router(filesRouter.router)
 app.include_router(notificationsRouter.router)
 app.include_router(settingsRouter.router)
+app.include_router(chatRouter.router)
 
 # --- Event Handlers ---
 @app.on_event("startup")

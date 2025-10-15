@@ -1,7 +1,7 @@
 # auth.py
 import datetime
 from typing import Optional
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -10,7 +10,7 @@ import sqlalchemy
 
 from database import get_db
 from models import users
-from schemas import User, TokenData
+from schemas import User
 
 # --- Authentication Configuration ---
 SECRET_KEY = "a_very_secret_key_change_this_in_production"
@@ -37,6 +37,20 @@ async def get_user_from_db(db: AsyncSession, email: str):
     query = sqlalchemy.select(users).where(users.c.email == email)
     result = await db.execute(query)
     return result.mappings().first()
+
+async def get_current_user_from_token(token: str, db: AsyncSession):
+    credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials for WebSocket")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = await get_user_from_db(db, email=email)
+    if user is None:
+        raise credentials_exception
+    return User.model_validate(user)
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})

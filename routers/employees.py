@@ -4,10 +4,10 @@ import sqlalchemy
 import json
 import datetime
 from typing import List
-from pydantic import BaseModel # <<< เพิ่มบรรทัดนี้
+from pydantic import BaseModel
 
 from database import get_db
-from models import employees, jobs, comics, payrolls
+from models import employees, jobs, comics, payrolls, users # <<< FIX: เพิ่ม users ตรงนี้
 from schemas import User, JobWithComicInfo
 import auth
 
@@ -43,8 +43,6 @@ async def delete_employee(employee_id: int, db: AsyncSession = Depends(get_db), 
     
     await db.commit()
     return {"message": "Employee and all associated data have been permanently deleted."}
-
-
 
 
 async def _get_summary_logic(employee_id: int, db: AsyncSession):
