@@ -140,3 +140,34 @@ async def update_comic(comic_id: int, comic_update: ComicUpdate, db: AsyncSessio
     await db.commit()
     return {"message": "Comic updated successfully"}
 
+@router.delete("/{comic_id}/", status_code=200)
+async def delete_comic(comic_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+    # 1. ตรวจสอบความเป็นเจ้าของ
+    comic_res = await db.execute(
+        sqlalchemy.select(comics).where(
+            sqlalchemy.and_(
+                comics.c.id == comic_id, 
+                comics.c.employer_id == current_user.id
+            )
+        )
+    )
+    comic_to_delete = comic_res.mappings().first()
+
+    if not comic_to_delete:
+        raise HTTPException(status_code=404, detail="Comic not found or not accessible")
+
+    # 2. ลบไฟล์ภาพปกจริง (ถ้ามี)
+    if comic_to_delete.image_file:
+        file_path = os.path.join("covers", comic_to_delete.image_file)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"WARNING: Failed to delete cover image {file_path}: {e}")
+
+    # 3. ลบ Comic Record (การลบนี้จะลบ Jobs, Chat Rooms, Employees ที่เกี่ยวข้องผ่าน ON DELETE CASCADE)
+    delete_query = sqlalchemy.delete(comics).where(comics.c.id == comic_id)
+    await db.execute(delete_query)
+    await db.commit()
+
+    return {"message": "Comic and all associated data deleted successfully"}
