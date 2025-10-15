@@ -150,10 +150,7 @@ async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = D
     employee_profile = emp_res.mappings().first()
     if not employee_profile:
         raise HTTPException(status_code=404, detail="Employee profile not found")
-        
-    # <<< ลบ Subquery และ Outer Join ที่ซับซ้อนออกทั้งหมด >>>
-    # (เราจะพึ่งพา Frontend ในการเรียก /jobs/{job_id}/supplemental-files/ แทน)
-    
+            
     jobs_query = (
         sqlalchemy.select(
             jobs.c.id, jobs.c.comic_id, jobs.c.employee_id, jobs.c.episode_number, jobs.c.task_type, jobs.c.rate, jobs.c.status, jobs.c.assigned_date, jobs.c.completed_date, 
@@ -173,7 +170,7 @@ async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = D
         )
         .where(jobs.c.employee_id == employee_profile['id'])
         # <<< เพิ่ม Group By เพื่อให้แน่ใจว่าได้ Job ID ที่ไม่ซ้ำกัน >>>
-        .group_by(jobs.c.id) 
+        # .group_by(jobs.c.id) 
         # --------------------------------------------------------
         .order_by(sqlalchemy.desc(jobs.c.assigned_date))
     )

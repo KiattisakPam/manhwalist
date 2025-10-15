@@ -464,10 +464,10 @@ async def delete_chat_room(
     # <<< FIX 1: ค้นหาและลบไฟล์จริงก่อนลบข้อความ >>>
     file_query = sqlalchemy.select(chat_messages.c.content).where(
         chat_messages.c.room_id == room_id,
-        chat_messages.c.message_type.in_(['image', 'file']) # ค้นหาเฉพาะข้อความที่เป็นไฟล์/รูปภาพ
+        chat_messages.c.message_type.in_(['image', 'file']) 
     )
     file_results = (await db.execute(file_query)).scalars().all()
-    
+
     deleted_files_count = 0
     for file_name in file_results:
         # file_name ใน content จะเป็นชื่อไฟล์โดยตรง
@@ -478,8 +478,6 @@ async def delete_chat_room(
                 deleted_files_count += 1
             except Exception as e:
                 print(f"ERROR: Failed to delete file {file_path}: {e}")
-        else:
-            print(f"WARNING: File not found on disk: {file_path}")
 
     print(f"INFO: Processed {len(file_results)} message records; Deleted {deleted_files_count} physical files.")
     # ------------------------------------------------------------------
