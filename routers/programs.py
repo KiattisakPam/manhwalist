@@ -27,6 +27,7 @@ async def create_program(program: Program, db: AsyncSession = Depends(get_db)):
     query = sqlalchemy.insert(programs).values(name=program.name, path=program.path)
     result = await db.execute(query)
     await db.commit()
+    # <<< จุดที่ต้องตรวจสอบ: result.inserted_primary_key[0] อาจเป็น Null >>>
     return {"id": result.inserted_primary_key[0], **program.model_dump()}
 
 @router.delete("/{program_id}")
