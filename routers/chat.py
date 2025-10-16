@@ -5,7 +5,7 @@ import datetime
 import os
 import shutil
 from typing import List, Dict, Optional
-
+from sqlalchemy.dialects import postgresql
 from database import get_db
 from models import users, employees, chat_rooms, chat_messages, jobs, comics, chat_read_status
 from schemas import User, ChatRoomInfo, ChatRoomCreate, ChatRoomListResponse
@@ -417,16 +417,19 @@ async def mark_room_as_read(
     # 2. ใช้ ID ที่ส่งมา หรือ ID ข้อความล่าสุด ถ้า ID ที่ส่งมาใหญ่กว่า
     id_to_mark = min(last_message_id, max_message_id or last_message_id)
     
-    # 3. ดำเนินการ Update/Insert
-    update_query = sqlalchemy.dialects.sqlite.insert(chat_read_status).values(
+    # 3. ดำเนินการ Update/Insert (ใช้ on_conflict_do_update ของ PostgreSQL)
+    # เราใช้ postgresql.insert เพราะมันทำงานร่วมกับ AsyncSession ได้ดีกว่า
+    insert_stmt = postgresql.insert(chat_read_status).values(
         room_id=room_id,
         user_id=current_user.id,
         last_read_message_id=id_to_mark
     )
-    update_query = update_query.on_conflict_do_update(
-        index_elements=['room_id', 'user_id'],
+    # กำหนดเงื่อนไขการชนกัน: ถ้า unique index (room_id, user_id) ชนกัน ให้ทำการอัปเดต
+    update_query = insert_stmt.on_conflict_do_update(
+        index_elements=['room_id', 'user_id'], # ใช้ unique constraint ที่กำหนดไว้ใน models.py
         set_={'last_read_message_id': id_to_mark}
     )
+    
     await db.execute(update_query)
     await db.commit()
     
