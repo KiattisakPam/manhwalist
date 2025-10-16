@@ -415,7 +415,6 @@ async def mark_room_as_read(
     )
     
     # 2. ใช้ ID ที่ส่งมา หรือ ID ข้อความล่าสุด ถ้า ID ที่ส่งมาใหญ่กว่า
-    # เราจะใช้ ID ที่ส่งมาเท่านั้น แต่ต้องมั่นใจว่ามันไม่เกิน max_message_id เพื่อความปลอดภัย
     id_to_mark = min(last_message_id, max_message_id or last_message_id)
     
     # 3. ดำเนินการ Update/Insert
