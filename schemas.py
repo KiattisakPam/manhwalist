@@ -97,9 +97,10 @@ class PayrollCreate(BaseModel):
     job_ids: List[int]
 
 class Program(BaseModel):
+    id: int | None = None
     name: str
     path: str
-    
+        
 class JobSupplementalFile(BaseModel):
     id: int
     job_id: int
