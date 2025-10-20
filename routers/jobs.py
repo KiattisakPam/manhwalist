@@ -28,7 +28,7 @@ async def get_all_jobs(db: AsyncSession = Depends(get_db), current_user: User = 
         comics.c.title.label("comic_title"),
         comics.c.image_file.label("comic_image_file")
     ).select_from(
-        jobs.join(employees, jobs.c.employee_id == employees.c.id)\
+        jobs.join(employees, jobs.c.employee_id == employees.c.id)
             .join(comics, jobs.c.comic_id == comics.c.id)
     ).where(comics.c.employer_id == current_user.id).order_by(sqlalchemy.desc(jobs.c.assigned_date))
     result = await db.execute(query)
@@ -58,6 +58,7 @@ async def create_job(
     if not employee or employee.employer_id != current_user.id:
         raise HTTPException(status_code=403, detail="Employee not found or not owned by user")
         
+    # [FIX: สร้างโฟลเดอร์ก่อนใช้งาน]
     os.makedirs("job_files", exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
 
@@ -97,6 +98,9 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
     if employee_user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to complete this job")
     # -------------------------------------------------------------
+    
+    # [FIX 1: สร้างโฟลเดอร์ก่อนบันทึกไฟล์ใหม่]
+    os.makedirs("job_files", exist_ok=True)
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     new_file_name = f"fin_{timestamp}_ep{job['episode_number']}_{finished_file.filename}"
@@ -104,9 +108,20 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
     with open(new_file_path, "wb") as buffer:
         shutil.copyfileobj(finished_file.file, buffer)
 
-    # 2. <<< แก้ไข Logic การลบไฟล์: ลบไฟล์งานที่พนักงานส่งมาครั้งก่อนหน้าเท่านั้น >>>
-    if job.get('employee_finished_file') and os.path.exists(os.path.join("job_files", job['employee_finished_file'])):
-        os.remove(os.path.join(os.path.join("job_files", job['employee_finished_file'])))
+    # 2. <<< FIX 2: ลบไฟล์เก่าอย่างปลอดภัย (ใช้ try-except) >>>
+    if job.get('employee_finished_file'):
+        file_path_to_delete = os.path.join("job_files", job['employee_finished_file'])
+        
+        try:
+            if os.path.exists(file_path_to_delete):
+                os.remove(file_path_to_delete)
+            else:
+                # ถ้าไฟล์หายไปแล้ว ไม่ต้องทำอะไรต่อ
+                print(f"WARNING: Old file not found for removal (OK on Ephemeral Storage): {file_path_to_delete}")
+        except Exception as e:
+            # ดักจับ PermissionError หรือ FileNotFoundError ที่อาจเกิดขึ้นอีก
+            print(f"ERROR: Failed to remove old finished file {file_path_to_delete}. Continuing: {e}")
+            pass 
     # --------------------------------------------------------------------------
 
     await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(
@@ -156,12 +171,9 @@ async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = D
             jobs.c.id, jobs.c.comic_id, jobs.c.employee_id, jobs.c.episode_number, jobs.c.task_type, jobs.c.rate, jobs.c.status, jobs.c.assigned_date, jobs.c.completed_date, 
             jobs.c.employer_work_file, jobs.c.employee_finished_file, jobs.c.telegram_link, jobs.c.payroll_id, jobs.c.is_revision,
             
-            # ดึงเฉพาะไฟล์เสริมที่มาพร้อมกับงานตั้งแต่แรก (supplemental_file)
             jobs.c.supplemental_file, 
             jobs.c.supplemental_file_comment,
 
-            # (ลบ latest_supplemental_file และ comment ออก)
-            
             comics.c.title.label("comic_title"),
             comics.c.image_file.label("comic_image_file")
         )
@@ -169,14 +181,13 @@ async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = D
             jobs.join(comics, jobs.c.comic_id == comics.c.id)
         )
         .where(jobs.c.employee_id == employee_profile['id'])
-        # <<< เพิ่ม Group By เพื่อให้แน่ใจว่าได้ Job ID ที่ไม่ซ้ำกัน >>>
-        # .group_by(jobs.c.id) 
-        # --------------------------------------------------------
+        # .group_by(jobs.c.id) (บรรทัดนี้ถูกลบแล้ว)
         .order_by(sqlalchemy.desc(jobs.c.assigned_date))
     )
     jobs_res = await db.execute(jobs_query)
     
     return jobs_res.mappings().all()
+
 
 @router.put("/{job_id}/request-revision", status_code=200)
 async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -194,10 +205,15 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
     if job.status != "COMPLETED":
         raise HTTPException(status_code=400, detail="Only completed jobs can be sent for revision")
 
-    # 2. <<< ลบไฟล์งานที่พนักงานส่งมาล่าสุดเท่านั้น (employee_finished_file) >>>
-    if job.employee_finished_file and os.path.exists(os.path.join("job_files", job.employee_finished_file)):
-        os.remove(os.path.join("job_files", job.employee_finished_file))
-    # --------------------------------------------------------------------------
+    # [FIX: ลบไฟล์งานที่พนักงานส่งมาล่าสุดอย่างปลอดภัย]
+    if job.employee_finished_file:
+        file_path_to_delete = os.path.join("job_files", job.employee_finished_file)
+        try:
+            if os.path.exists(file_path_to_delete):
+                os.remove(file_path_to_delete)
+        except Exception as e:
+            print(f"WARNING: Failed to delete revision file {file_path_to_delete}: {e}")
+            pass
         
     await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(
         status="ASSIGNED", 
@@ -243,28 +259,37 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     if owner_id != current_user.id:
          raise HTTPException(status_code=403, detail="Not authorized to modify this job")
 
-    # 2. ลบไฟล์งานหลักและไฟล์ที่พนักงานส่ง (โค้ดเดิม)
-    if job.employer_work_file and os.path.exists(os.path.join("job_files", job.employer_work_file)):
-        os.remove(os.path.join("job_files", job.employer_work_file))
-    if job.employee_finished_file and os.path.exists(os.path.join("job_files", job.employee_finished_file)):
-        os.remove(os.path.join("job_files", job.employee_finished_file))
-
+    files_to_check = [
+        job.employer_work_file, 
+        job.employee_finished_file, 
+        job.supplemental_file
+    ]
+    
+    # ลบไฟล์งานหลัก, ไฟล์ที่พนักงานส่ง, และไฟล์เสริมที่มาพร้อมงาน
+    for file_name in files_to_check:
+        if file_name:
+            file_path = os.path.join("job_files", file_name)
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                print(f"WARNING: Failed to delete main/finished file {file_path}: {e}")
+                pass
     # 3. <<< ลบ Supplemental Files ทั้งหมดที่เพิ่มมาภายหลัง >>>
     # ค้นหารายการไฟล์เสริมทั้งหมด
     supp_files_query = sqlalchemy.select(job_supplemental_files.c.file_name).where(job_supplemental_files.c.job_id == job_id)
     supp_files_result = await db.execute(supp_files_query)
     supplemental_files_to_delete = supp_files_result.scalars().all()
     
-    # ลบไฟล์ออกจาก Disk
     for file_name in supplemental_files_to_delete:
         file_path = os.path.join("job_files", file_name)
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-    # ลบไฟล์เสริมที่แนบมาตอนสร้างงานด้วย (ซึ่งอยู่ในคอลัมน์ job.supplemental_file)
-    if job.supplemental_file and os.path.exists(os.path.join("job_files", job.supplemental_file)):
-        os.remove(os.path.join("job_files", job.supplemental_file))
-
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"WARNING: Failed to delete supplemental file {file_path}: {e}")
+            pass
+        
     # 4. ลบ Record จากตาราง job_supplemental_files
     delete_supp_query = sqlalchemy.delete(job_supplemental_files).where(job_supplemental_files.c.job_id == job_id)
     await db.execute(delete_supp_query)
@@ -275,7 +300,6 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
         status="ARCHIVED",
         employer_work_file=None,
         employee_finished_file=None,
-        # <<< ล้างชื่อไฟล์เสริมที่แนบมาตอนสร้างงานด้วย >>>
         supplemental_file=None, 
         supplemental_file_comment=None,
     ))
