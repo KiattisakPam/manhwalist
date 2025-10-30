@@ -234,7 +234,7 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
         tokens = (await db.execute(token_query)).scalars().all()
         
         title = f"🎉 งานเสร็จแล้ว!"
-        body = f"{employee_name} ได้ส่งงานตอนที่ {job.episode_number} ของเรื่อง '{comic_title}' เรียบร้อยแล้ว"
+        body = f"ตอนที่ {job.episode_number} ของเรื่อง *{comic_title}*"
 
         if target_employer_id:
             # ... (โค้ดเดิม) ...
@@ -367,7 +367,7 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
             tokens = (await db.execute(token_query)).scalars().all()
         
         title = f"⚠️ มีงานต้องแก้ไข!"
-        body = f"งานตอนที่ {job.episode_number} ของเรื่อง '{comic_title}' ถูกส่งกลับให้แก้ไข"
+        body = f"แก้งานตอนที่ {job.episode_number} ของเรื่อง *{comic_title}* นะครับ"
 
         if emp_user_id:
             # --- [แก้ไข] ส่วน Telegram Notification ---
@@ -625,8 +625,8 @@ async def add_supplemental_file_to_job(
             token_query = sqlalchemy.select(fcm_devices.c.device_token).where(fcm_devices.c.user_id == emp_user_id, fcm_devices.c.is_active == True)
             tokens = (await db.execute(token_query)).scalars().all()
 
-        title = f"📁 คำแปลใหม่!"
-        body = f"ผู้จ้างได้เพิ่มคำแปลในงานตอนที่ {job.episode_number} ของเรื่อง '{job.title}'" # ใช้ job.title ที่ดึงมา
+        title = f"📁 คำแปลมาแล้ว!"
+        body = f"ในงานตอนที่ {job.episode_number} ของเรื่อง '{job.title}'" # ใช้ job.title ที่ดึงมา
         
         if emp_user_id:
             # --- [แก้ไข] ส่วน Telegram Notification ---
