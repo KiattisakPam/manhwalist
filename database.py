@@ -17,6 +17,8 @@ if db_url.startswith("postgres"):
         db_url = db_url.replace("postgres://", "postgresql+asyncpg://")
 # *** สิ้นสุดการแก้ไข ***
 
+
+
 engine = create_async_engine(db_url, connect_args={"check_same_thread": False} if "sqlite" in db_url else {})
 metadata = sqlalchemy.MetaData()
 

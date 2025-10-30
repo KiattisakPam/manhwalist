@@ -82,7 +82,7 @@ async def create_employee_user(
     await db.commit()
     return {"message": "Employee created successfully"}
 
-@router.put("/employee/{employee_id}/details", status_code=200)
+@router.post("/employee/{employee_id}/details", status_code=200)
 async def update_employee_details(
     employee_id: int,
     name: str = Form(...),
@@ -90,20 +90,47 @@ async def update_employee_details(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(auth.get_current_employer_user)
 ):
+    # 1. ตรวจสอบ Employee
     emp_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
     employee = emp_res.mappings().first()
     if not employee or employee.employer_id != current_user.id:
+        print(f"DEBUG_UPDATE: Employee ID {employee_id} not found or not owned by employer {current_user.id}")
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    # [LOG] แสดง User ID ที่กำลังจะ Query
+    print(f"DEBUG_UPDATE: Querying User ID: {employee.user_id}")
+    
+    # 2. ตรวจสอบ User
     user_res = await db.execute(sqlalchemy.select(users).where(users.c.id == employee.user_id))
     user = user_res.mappings().first()
 
-    if email != user.email:
-        existing_user = await auth.get_user_from_db(db, email)
-        if existing_user:
-            raise HTTPException(status_code=400, detail="New email is already in use")
+    # [LOG] แสดงผลลัพธ์การ Query User
+    print(f"DEBUG_UPDATE: Query Result for User ID {employee.user_id}: {user}")
     
+    # [CRITICAL FIX] ป้องกัน NoneType Error
+    if user is None:
+        raise HTTPException(status_code=500, detail="Associated user account not found for this employee. User ID might be corrupted.") # 
+    
+    # 3. ตรวจสอบ Email ซ้ำ
+    if email != user.email:
+        # ต้องเช็คว่า email ใหม่ไม่ได้ถูกใช้โดย user คนอื่น (ที่ไม่ใช่ตัวมันเอง)
+        existing_user_res = await db.execute(
+            sqlalchemy.select(users).where(
+                sqlalchemy.and_(
+                    users.c.email == email,
+                    users.c.id != employee.user_id 
+                )
+            )
+        )
+        existing_user = existing_user_res.mappings().first()
+        
+        if existing_user:
+            raise HTTPException(status_code=400, detail="New email is already in use by another user.")
+    
+    # 4. อัปเดตข้อมูล
+    # อัปเดตตาราง employees (อัปเดตชื่อ)
     await db.execute(sqlalchemy.update(employees).where(employees.c.id == employee_id).values(name=name))
+    # อัปเดตตาราง users (อัปเดตอีเมล)
     await db.execute(sqlalchemy.update(users).where(users.c.id == employee.user_id).values(email=email))
     
     await db.commit()

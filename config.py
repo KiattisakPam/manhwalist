@@ -2,6 +2,7 @@
 # (คุณอาจต้องติดตั้ง pydantic-settings ถ้ายังไม่ได้ติดตั้ง)
 
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 class Settings(BaseSettings):
     # 'DATABASE_URL' จะถูกอ่านจาก Environment Variable ในระบบโฮสต์
@@ -9,6 +10,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str 
     # --- เพิ่มบรรทัดนี้ ---
     INVITATION_CODE: str = "DEFAULT_SECRET_CHANGE_ME"
+    
+    TELEGRAM_BOT_TOKEN_NOTIFY: Optional[str] = None # <<< Bot A
+    TELEGRAM_BOT_TOKEN_REPORT: Optional[str] = None # <<< Bot B
 
     class Config:
         env_file = ".env" # สามารถเพิ่มการอ่านจาก .env ใน Local ได้

@@ -37,6 +37,7 @@ employees = sqlalchemy.Table(
     sqlalchemy.Column("employer_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
     sqlalchemy.Column("name", sqlalchemy.String, nullable=False, unique=True),
     sqlalchemy.Column("user_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("users.id", ondelete="CASCADE")),
+    sqlalchemy.Column("telegram_chat_id", sqlalchemy.String, nullable=True),
 )
 
 jobs = sqlalchemy.Table(
@@ -57,6 +58,7 @@ jobs = sqlalchemy.Table(
     sqlalchemy.Column("is_revision", sqlalchemy.Boolean, default=False, nullable=False),
     sqlalchemy.Column("supplemental_file", sqlalchemy.String),
     sqlalchemy.Column("supplemental_file_comment", sqlalchemy.String),
+    sqlalchemy.Column("last_telegram_activity", sqlalchemy.String),
 )
 
 fcm_devices = sqlalchemy.Table(

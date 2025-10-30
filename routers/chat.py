@@ -7,9 +7,13 @@ import shutil
 from typing import List, Dict, Optional
 from sqlalchemy.dialects import postgresql
 from database import get_db
-from models import users, employees, chat_rooms, chat_messages, jobs, comics, chat_read_status
+from models import users, employees, chat_rooms, chat_messages, jobs, comics, chat_read_status, fcm_devices
 from schemas import User, ChatRoomInfo, ChatRoomCreate, ChatRoomListResponse
 import auth
+import firebase_config
+import asyncio
+import telegram_config
+
 
 router = APIRouter(
     prefix="/chat",
@@ -54,69 +58,158 @@ async def websocket_endpoint(
     current_user_role = current_user.role
 
     await manager.connect(room_id, websocket)
-    print(f"INFO:     Client {current_user.email} connected to room {room_id}") # DEBUG: เพิ่ม log การเชื่อมต่อ
+    print(f"INFO:     Client {current_user.email} connected to room {room_id}")
 
     try:
         while True:
             data = await websocket.receive_json()
-            print(f"DEBUG:    Received data from {current_user.email}: {data}") # DEBUG: แสดงข้อมูลที่ได้รับ
+            print(f"DEBUG:     Received data from {current_user.email}: {data}")
 
             message_type = data.get("type", "text")
 
+            # --- Logic การลบข้อความ (Delete Logic) ---
             if message_type == 'delete':
                 message_id = data.get("message_id")
                 if message_id:
-                    # <<< แก้ไข: ตรวจสอบความเป็นเจ้าของและ room_id ของข้อความ >>>
+                    # (Logic ตรวจสอบสิทธิ์การลบ: Owner หรือ Employer)
                     msg_res = await db.execute(sqlalchemy.select(chat_messages.c.sender_id, chat_messages.c.room_id).where(chat_messages.c.id == message_id))
                     msg_info = msg_res.one_or_none()
-                
-                    # ตรวจสอบว่าข้อความมีอยู่, ผู้ใช้ปัจจุบันเป็นเจ้าของ, และข้อความนั้นอยู่ในห้องนี้จริง
+                    
+                    # (ส่วนตรวจสอบ can_delete ที่ซับซ้อนควรถูกย้ายไปในฟังก์ชัน helper หรือทำให้ง่ายขึ้นเพื่อหลีกเลี่ยง Error)
+                    # แต่โดยพื้นฐานคือ:
                     if msg_info and msg_info.sender_id == current_user.id and msg_info.room_id == room_id:
                         await db.execute(sqlalchemy.delete(chat_messages).where(chat_messages.c.id == message_id))
                         await db.commit()
                         await manager.broadcast(room_id, {"type": "delete", "message_id": message_id})
-                    # ------------------------------------------
                 continue 
-
-            # --- ส่วนที่แก้ไข ---
-            # ใช้ .get() เพื่อป้องกัน KeyError ถ้าหาก frontend ไม่ได้ส่ง 'content' มา
+            # ----------------------------------------
+            
+            # --- Logic การบันทึกข้อความ (Save Logic) ---
             content = data.get("content") 
             if content is None:
                 print(f"WARNING:  Received message with no 'content' from {current_user.email}. Data: {data}")
-                continue # ข้ามไปรอรับข้อความถัดไป ไม่ให้โปรแกรมแครช
-            # --------------------
+                continue
 
             now = datetime.datetime.now().isoformat()
 
             insert_query = sqlalchemy.insert(chat_messages).values(
-                room_id=room_id,
-                sender_id=current_user.id,
-                message_type=message_type,
-                content=content,
-                sent_at=now
+                room_id=room_id, sender_id=current_user.id, message_type=message_type,
+                content=content, sent_at=now
             )
             result = await db.execute(insert_query)
             await db.commit()
 
             new_message_id = result.inserted_primary_key[0]
-            print(f"INFO:     Message {new_message_id} from {current_user.email} saved to DB.") # DEBUG
+            print(f"INFO:     Message {new_message_id} from {current_user.email} saved to DB.")
 
             new_message = {
-                "id": new_message_id,
-                "room_id": room_id, "sender_id": current_user.id,
+                "id": new_message_id, "room_id": room_id, "sender_id": current_user.id,
                 "message_type": message_type, "content": content, "sent_at": now,
-                "sender_email": current_user_email, 
-                "sender_role": current_user_role,
+                "sender_email": current_user_email, "sender_role": current_user_role,
             }
 
             await manager.broadcast(room_id, new_message)
-            print(f"INFO:     Broadcasting message {new_message_id} to room {room_id}") # DEBUG
+            print(f"INFO:     Broadcasting message {new_message_id} to room {room_id}")
 
+            # <<< FIX: วาง Logic การส่ง Notification หลัง Broadcast และก่อนวนซ้ำ >>>
+            try:
+                # 1. หาข้อมูลห้องแชท (Employer/Employee IDs)
+                room_res = await db.execute(sqlalchemy.select(chat_rooms.c.employer_id, chat_rooms.c.employee_id).where(chat_rooms.c.id == room_id))
+                room_info = room_res.mappings().first()
+                if not room_info: raise Exception("Room info not found")
+
+                target_user_id = None
+                sender_name = ""
+
+                # 2. กำหนดผู้รับ (Target User ID)
+                if current_user_role == 'employer':
+                    emp_res = await db.execute(sqlalchemy.select(employees.c.user_id).where(employees.c.id == room_info.employee_id))
+                    target_user_id = emp_res.scalar_one_or_none()
+                    sender_name = "ผู้จ้าง" 
+                else: # ผู้ส่งคือ Employee
+                    target_user_id = room_info.employer_id
+                    emp_name_res = await db.execute(sqlalchemy.select(employees.c.name).where(employees.c.user_id == current_user.id))
+                    sender_name = emp_name_res.scalar_one_or_none() or "พนักงาน"
+                    
+                # 3. ส่ง Notification ถ้าพบผู้รับ
+                if target_user_id: 
+                    # 1. กำหนด employee_id ที่ใช้ดึง Chat ID
+                    employee_id_to_check = None
+                    if current_user_role == 'employer':
+                        # ผู้รับคือ Employee, ดึง ID จาก room_info
+                        employee_id_to_check = room_info.employee_id
+                        selected_bot_type = 'NOTIFY' # Bot A: ผู้จ้างส่ง
+                    else: # ผู้ส่งคือ Employee
+                        # ดึง ID ของ Employee ที่กำลังส่งข้อความ (ผู้ส่ง)
+                        sender_emp_res = await db.execute(
+                             sqlalchemy.select(employees.c.id).where(employees.c.user_id == current_user.id)
+                        )
+                        employee_id_to_check = sender_emp_res.scalar_one_or_none()
+                        selected_bot_type = 'REPORT' # Bot B: พนักงานส่ง
+                        
+                    # 2. ดึง Chat ID จาก Employee Profile
+                    telegram_chat_id = None
+                    if employee_id_to_check:
+                         emp_chat_res = await db.execute(
+                            sqlalchemy.select(employees.c.telegram_chat_id)
+                            .where(employees.c.id == employee_id_to_check)
+                        )
+                         telegram_chat_id = emp_chat_res.scalar_one_or_none()
+                    
+                    # 3. เตรียม Message สำหรับ Bridge App (ใช้ Logic เดิม)
+                    bridge_message = {
+                        "type": "NEW_CHAT",
+                        "sender": sender_name,
+                        "message_preview": content if message_type == 'text' else f"ส่ง{message_type}แนบมา",
+                        "room_id": room_id,
+                    }
+
+                    # 4. ส่งสัญญาณไป Bridge App (Logic เดิม)
+                    await notification_manager.send_personal_notification(target_user_id, bridge_message)
+
+                    # 5. ส่ง Telegram (ใช้ Bot A หรือ Bot B ตามผู้ส่ง)
+                    if telegram_chat_id:
+                        title = f"✉️ ข้อความใหม่จาก {sender_name}"
+                        body_preview = bridge_message['message_preview']
+                        
+                        # [แก้ไข] ข้อความที่สะอาดที่สุด (ไม่มีลิงก์)
+                        telegram_message = (
+                            f"*{title}*\n"
+                            f"{body_preview}" 
+                        )
+                        
+                        is_user_online = target_user_id in notification_manager.active_user_connections
+                        
+                        await telegram_config.send_telegram_notification(
+                            telegram_chat_id, 
+                            telegram_message, 
+                            bot_type=selected_bot_type, # <<< [สำคัญ] ใช้ Bot ที่เลือก
+                            disable_notification=is_user_online
+                        )
+                    
+                    # 6. ส่ง FCM เป็นตัวสำรอง
+                    token_query = sqlalchemy.select(fcm_devices.c.device_token).where(
+                        fcm_devices.c.user_id == target_user_id, 
+                        fcm_devices.c.is_active == True
+                    )
+                    tokens = (await db.execute(token_query)).scalars().all()
+
+                    if tokens:
+                        firebase_config.send_notification(
+                            tokens=tokens,
+                            title=f"✉️ ข้อความใหม่จาก {sender_name}",
+                            body=bridge_message['message_preview']
+                        )
+                        print(f"INFO: Successfully sent FCM to User ID {target_user_id}")
+            except Exception as e: # <-- โค้ดเดิมจะต่อจากบรรทัดนี้
+                
+                print(f"ERROR: Failed to send chat notification: {e}")
+                
     except WebSocketDisconnect:
         manager.disconnect(room_id, websocket)
         print(f"INFO:     Client {current_user.email} disconnected from room {room_id}")
     except Exception as e:
-        # เพิ่มการดักจับ Error ทั่วไป เพื่อดูว่ามีปัญหาอะไรเกิดขึ้น
+        # Catch หลักสำหรับ Error อื่น ๆ
         print(f"ERROR:    An error occurred in websocket for user {current_user.email}: {e}")
         manager.disconnect(room_id, websocket)
         
@@ -549,3 +642,85 @@ async def get_my_unread_count(
     total_unread = await db.scalar(unread_count_query) or 0
         
     return {"total_unread": total_unread}
+
+
+class NotificationManager:
+    """จัดการการเชื่อมต่อ WebSocket ของผู้ใช้แต่ละคน (สำหรับ Bridge/Foreground App)"""
+    def __init__(self):
+        # Dictionary สำหรับเก็บ WebSocket Connection ของ User แต่ละคน
+        # {user_id: [websocket1, websocket2, ...]}
+        self.active_user_connections: Dict[int, List[WebSocket]] = {}
+        
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if user_id not in self.active_user_connections:
+            self.active_user_connections[user_id] = []
+        self.active_user_connections[user_id].append(websocket)
+        
+    def disconnect(self, user_id: int, websocket: WebSocket):
+        if user_id in self.active_user_connections:
+            self.active_user_connections[user_id].remove(websocket)
+            if not self.active_user_connections[user_id]:
+                 del self.active_user_connections[user_id] # ลบ key ถ้า List ว่าง
+
+    # ฟังก์ชันนี้ถูกเรียกใช้เมื่อมี Event เกิดขึ้นในระบบ (เช่น สร้างงานใหม่)
+    async def send_personal_notification(self, user_id: int, message: dict):
+        if user_id in self.active_user_connections:
+            for connection in self.active_user_connections[user_id]:
+                await connection.send_json(message)
+                
+notification_manager = NotificationManager()
+
+@router.websocket("/ws/updates/{user_id}")
+async def updates_websocket_endpoint(
+    websocket: WebSocket,
+    user_id: int,
+    token: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Endpoint สำหรับให้ Bridge App เชื่อมต่อ"""
+    current_user = None
+    
+    try:
+        # 1. ตรวจสอบ Token และดึง User
+        # NOTE: ตรวจสอบให้แน่ใจว่า auth.get_current_user_from_token ทำงานถูกต้อง
+        current_user = await auth.get_current_user_from_token(token, db)
+        
+    except HTTPException as e:
+        # [FIX 1] จัดการ HTTPException ที่เกิดจากการตรวจสอบ Token
+        # โค้ด 1008 คือ Policy Violation (ใช้สำหรับ Unauthorized/Forbidden ใน WS)
+        print(f"ERROR: Token validation failed for WS: {e.detail}")
+        await websocket.close(code=1008, reason=f"Invalid token: {e.detail}")
+        return
+
+    # 2. ตรวจสอบ User ID (ป้องกันการสวมรอย)
+    if current_user.id != user_id:
+         print(f"ERROR: Unauthorized access attempt. Token ID {current_user.id} != Path ID {user_id}")
+         await websocket.close(code=1008, reason="Unauthorized user ID mismatch")
+         return
+
+    # 3. เชื่อมต่อสำเร็จ
+    await notification_manager.connect(user_id, websocket)
+    print(f"INFO:     Bridge App connected for User ID {user_id}")
+    try:
+        # [CRITICAL FIX] ใช้ Loop ที่จัดการ Timeout และ Receive พร้อมกัน
+        while True:
+            # รอกิจกรรมจาก Client เป็นเวลา 25 วินาที
+            try:
+                # ถ้าไม่ได้รับข้อความใดๆ ภายใน 25 วินาที จะเกิด asyncio.TimeoutError
+                # ซึ่งทำให้ loop ทำงานต่อและรักษา Connection alive ได้
+                await asyncio.wait_for(
+                    websocket.receive_text(), 
+                    timeout=25.0 
+                )
+            except asyncio.TimeoutError:
+                pass # ปล่อยให้ Loop ทำงานต่อ (Heartbeat)
+            
+    except WebSocketDisconnect:
+        notification_manager.disconnect(user_id, websocket)
+        print(f"INFO:     Bridge App disconnected for User ID {user_id}")
+    except Exception as e:
+        print(f"ERROR:    Bridge App error for User ID {user_id}: {e}")
+        notification_manager.disconnect(user_id, websocket)
+
+# NOTE: Endpoint /ws/{room_id} ของ Chat จะยังคงอยู่และใช้ manager ตัวเดิม

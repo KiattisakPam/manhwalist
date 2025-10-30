@@ -136,3 +136,7 @@ class ChatRoomListResponse(BaseModel):
     total_unread_count: int
     rooms: List[ChatRoomInfo]
     
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    

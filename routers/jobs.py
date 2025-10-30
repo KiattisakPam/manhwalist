@@ -6,19 +6,21 @@ import os
 import shutil
 from typing import Optional, List
 
+# [OK] Import notification_manager
 from models import fcm_devices 
 from database import get_db
 from models import jobs, comics, employees, users, fcm_devices, job_supplemental_files
 from schemas import User, JobWithComicInfo, JobSupplementalFile
 import auth
 import firebase_config
+from routers.chat import notification_manager
+import telegram_config # <<< [สำคัญ] เพิ่ม Import Telegram Config
 
 router = APIRouter(
     prefix="/jobs",
     tags=["Jobs"],
     dependencies=[Depends(auth.get_current_user)]
 )
-
 
 @router.get("/all/", response_model=List[JobWithComicInfo])
 async def get_all_jobs(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -43,7 +45,7 @@ async def create_job(
     episode_number: int = Form(...),
     task_type: str = Form(...),
     rate: float = Form(...),
-    telegram_link: Optional[str] = Form(None),
+    telegram_link: Optional[str] = Form(None), # NOTE: ฟิลด์นี้ยังคงรับได้ แต่เราจะใช้ Chat ID จาก DB แทน
     work_file: UploadFile = File(...),
     supplemental_file: Optional[UploadFile] = File(None),
     supplemental_file_comment: Optional[str] = Form(None)
@@ -80,10 +82,90 @@ async def create_job(
         "employer_work_file": file_name, "telegram_link": telegram_link,
         "supplemental_file": supplemental_file_name,
         "supplemental_file_comment": supplemental_file_comment,
+        "last_telegram_activity": "NEW_JOB", # <<<<< แก้ไข: เซ็ตกิจกรรมเริ่มต้น >>>>>
     }
     res = await db.execute(sqlalchemy.insert(jobs).values(**job_data))
     await db.commit()
-    return {"id": res.inserted_primary_key[0], **job_data}
+    
+    new_job_id = res.inserted_primary_key[0]
+    
+    # 📌 กำหนดกิจกรรมปัจจุบัน (สำหรับอัปเดตสถานะสุดท้าย)
+    current_activity = 'NEW_JOB'
+    
+    try:
+        # 1. ดึงข้อมูล User ID, ชื่อพนักงาน, และ Chat ID (จาก employees)
+        emp_info_res = await db.execute(
+            sqlalchemy.select(employees.c.user_id, employees.c.name, employees.c.telegram_chat_id)
+            .where(employees.c.id == employee_id)
+        )
+        emp_info = emp_info_res.mappings().first()
+        
+        emp_user_id = emp_info.user_id if emp_info else None
+        employee_name = emp_info.name if emp_info else "พนักงาน"
+        telegram_chat_id = emp_info.telegram_chat_id if emp_info else None 
+
+        # --- [เพิ่ม] DEBUG PRINT ตรงนี้ ---
+        print(f"DEBUG_TELEGRAM: Attempting to notify job {new_job_id}")
+        print(f"DEBUG_TELEGRAM: Employee ID: {employee_id}, Found Chat ID: {telegram_chat_id}")
+        # ---------------------------------
+        
+        # 2. ดึง Token ของอุปกรณ์ (ถ้ามี User ID)
+        tokens = []
+        if emp_user_id:
+            token_query = sqlalchemy.select(fcm_devices.c.device_token).where(
+                fcm_devices.c.user_id == emp_user_id, 
+                fcm_devices.c.is_active == True
+            )
+            tokens = (await db.execute(token_query)).scalars().all()
+            
+        # 3. เตรียมข้อมูล Notification
+        comic_title = comic.title
+        title = f"💼 งาน{task_type}ใหม่!"
+        body = f"คุณได้รับงาน '{task_type}' ตอนที่ {episode_number} ของเรื่อง '{comic_title}'"
+        
+        if telegram_chat_id:
+            # 📌 งานใหม่: ต้องแสดงหัวข้อเต็มเสมอ
+            telegram_message = (
+                f"*{title}*  "
+                # f"มอบหมายงานให้: *{employee_name}*\n" 
+                f"เรื่อง: *{comic_title}* ตอนที่ {episode_number}"
+                # f"ประเภท: *{task_type}*" # <<< ลบลิงก์ออกทั้งหมด
+            )
+            await telegram_config.send_telegram_notification(
+                telegram_chat_id, 
+                telegram_message,
+                bot_type='NOTIFY' # <<< [สำคัญ] ใช้ Bot A (NOTIFY) สำหรับงานใหม่
+            )
+            
+        # 📌 อัปเดตกิจกรรมล่าสุดในฐานข้อมูล (ถ้ามีการส่ง Telegram)
+        if telegram_chat_id:
+             await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == new_job_id).values(
+                last_telegram_activity=current_activity
+            ))
+             await db.commit()
+             
+        if emp_user_id:
+            # 4.1. ส่ง Real-time Update (Bridge App)
+            bridge_message = {
+                "type": "NEW_JOB",
+                "title": title,
+                "body": body,
+                "job_id": new_job_id,
+            }
+            await notification_manager.send_personal_notification(emp_user_id, bridge_message)
+            
+            # 4.2. ส่ง FCM (Push Notification สำรอง)
+            if tokens:
+                firebase_config.send_notification(
+                    tokens=tokens,
+                    title=title, 
+                    body=body,
+                    data={"type": "new_job", "job_id": str(new_job_id)}
+                )
+    except Exception as e:
+        print(f"Failed to send new job notification: {e}")
+    
+    return {"id": new_job_id, **job_data}
 
 @router.put("/{job_id}/complete")
 async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db), finished_file: UploadFile = File(...), current_user: User = Depends(auth.get_current_user)):
@@ -93,10 +175,16 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=404, detail="Job not found")
 
     # 1. <<< ตรวจสอบสิทธิ์: ต้องเป็นพนักงานที่ได้รับมอบหมายงานนี้เท่านั้น >>>
-    emp_res = await db.execute(sqlalchemy.select(employees.c.user_id).where(employees.c.id == job.employee_id))
-    employee_user_id = emp_res.scalar_one_or_none()
-    if employee_user_id != current_user.id:
+    emp_res = await db.execute(sqlalchemy.select(employees.c.user_id, employees.c.name, employees.c.telegram_chat_id).where(employees.c.id == job.employee_id))
+    employee_info = emp_res.mappings().first()
+    if employee_info.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to complete this job")
+    
+    employee_name = employee_info.name # ดึงชื่อพนักงานมาใช้ใน Notification
+    telegram_chat_id = employee_info.telegram_chat_id # ดึง Chat ID มาใช้
+    
+    current_activity = 'JOB_COMPLETE' # <<<<< เพิ่ม: กำหนดกิจกรรมปัจจุบัน >>>>>
+
     # -------------------------------------------------------------
     
     # [FIX 1: สร้างโฟลเดอร์ก่อนบันทึกไฟล์ใหม่]
@@ -116,17 +204,17 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
             if os.path.exists(file_path_to_delete):
                 os.remove(file_path_to_delete)
             else:
-                # ถ้าไฟล์หายไปแล้ว ไม่ต้องทำอะไรต่อ
-                print(f"WARNING: Old file not found for removal (OK on Ephemeral Storage): {file_path_to_delete}")
+                print(f"WARNING: Old file not found for removal: {file_path_to_delete}")
         except Exception as e:
-            # ดักจับ PermissionError หรือ FileNotFoundError ที่อาจเกิดขึ้นอีก
             print(f"ERROR: Failed to remove old finished file {file_path_to_delete}. Continuing: {e}")
             pass 
     # --------------------------------------------------------------------------
 
+    # 📌 อัปเดตสถานะและอัปเดต last_telegram_activity
     await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(
         status="COMPLETED", employee_finished_file=new_file_name,
-        completed_date=datetime.datetime.now().isoformat()
+        completed_date=datetime.datetime.now().isoformat(),
+        last_telegram_activity=current_activity # <<<<< เพิ่ม/แก้ไข >>>>>
     ))
     await db.commit()
 
@@ -137,30 +225,68 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
         if not comic_info: raise Exception("Comic not found")
         
         comic_title = comic_info.title
-        target_employer_id = comic_info.employer_id
-
-        emp_res = await db.execute(sqlalchemy.select(employees.c.name).where(employees.c.id == job.employee_id))
-        employee_name = emp_res.scalar_one()
+        target_employer_id = comic_info.employer_id # User ID ของผู้จ้าง
 
         token_query = sqlalchemy.select(fcm_devices.c.device_token).where(
             fcm_devices.c.user_id == target_employer_id, 
             fcm_devices.c.is_active == True
         )
         tokens = (await db.execute(token_query)).scalars().all()
+        
+        title = f"🎉 งานเสร็จแล้ว!"
+        body = f"{employee_name} ได้ส่งงานตอนที่ {job.episode_number} ของเรื่อง '{comic_title}' เรียบร้อยแล้ว"
 
-        if tokens:
-            firebase_config.send_notification(
-                tokens=tokens,
-                title=f"🎉 งานเสร็จแล้ว!",
-                body=f"{employee_name} ได้ส่งงานตอนที่ {job.episode_number} ของเรื่อง '{comic_title}' เรียบร้อยแล้ว"
-            )
+        if target_employer_id:
+            # ... (โค้ดเดิม) ...
+            
+            # --- [แก้ไข] ส่วน Telegram Notification ---
+            if telegram_chat_id:
+                # 📌 Logic เปรียบเทียบกิจกรรม
+                if job.get('last_telegram_activity') == current_activity:
+                    # กิจกรรมซ้ำ (เช่น ส่งงานซ้ำ) -> ตัดหัวข้อออก
+                    telegram_message = (
+                        f"*{title}*  "
+                        f"{body}"
+                    )
+                else:
+                    # กิจกรรมใหม่ -> แสดงหัวข้อเต็ม
+                    telegram_message = (
+                        f"*{title}*  "
+                        f"{body}"
+                    )
+                
+                await telegram_config.send_telegram_notification(
+                    telegram_chat_id, 
+                    telegram_message,
+                    bot_type='REPORT' # <<< Bot B
+                )
+                
+            # 3.1. ส่ง Real-time Update (Bridge App)
+            bridge_message = {
+                "type": "JOB_COMPLETE",
+                "title": title,
+                "body": body,
+                "job_id": job_id,
+            }
+            await notification_manager.send_personal_notification(target_employer_id, bridge_message)
+
+            # 3.2. ส่ง FCM (Push Notification สำรอง)
+            if tokens:
+                firebase_config.send_notification(
+                    tokens=tokens,
+                    title=title,
+                    body=body,
+                    data={"type": "job_complete", "job_id": str(job_id)}
+                )
+            
     except Exception as e:
-        print(f"Failed to send notification: {e}")
+        print(f"Failed to send completion notification: {e}")
     
     return {"message": "Job completed successfully"}
 
 @router.get("/my-jobs/")
 async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    # ... (โค้ดเดิม) ...
     emp_res = await db.execute(sqlalchemy.select(employees.c.id).where(employees.c.user_id == current_user.id))
     employee_profile = emp_res.mappings().first()
     if not employee_profile:
@@ -181,13 +307,11 @@ async def get_my_jobs(db: AsyncSession = Depends(get_db), current_user: User = D
             jobs.join(comics, jobs.c.comic_id == comics.c.id)
         )
         .where(jobs.c.employee_id == employee_profile['id'])
-        # .group_by(jobs.c.id) (บรรทัดนี้ถูกลบแล้ว)
         .order_by(sqlalchemy.desc(jobs.c.assigned_date))
     )
     jobs_res = await db.execute(jobs_query)
     
     return jobs_res.mappings().all()
-
 
 @router.put("/{job_id}/request-revision", status_code=200)
 async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -196,6 +320,8 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
+    current_activity = 'REVISION_REQUEST' # <<<<< เพิ่ม: กำหนดกิจกรรมปัจจุบัน >>>>>
+
     # 1. ตรวจสอบความเป็นเจ้าของงาน
     comic_res = await db.execute(sqlalchemy.select(comics.c.employer_id).where(comics.c.id == job.comic_id))
     owner_id = comic_res.scalar_one_or_none()
@@ -215,11 +341,13 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
             print(f"WARNING: Failed to delete revision file {file_path_to_delete}: {e}")
             pass
         
+    # 📌 อัปเดตสถานะ ASSIGNED และ last_telegram_activity
     await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(
         status="ASSIGNED", 
         employee_finished_file=None,
         completed_date=None,
-        is_revision=True
+        is_revision=True,
+        last_telegram_activity=current_activity # <<<<< เพิ่ม/แก้ไข >>>>>
     ))
     await db.commit()
     
@@ -228,23 +356,63 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
         comic_res = await db.execute(sqlalchemy.select(comics.c.title).where(comics.c.id == job.comic_id))
         comic_title = comic_res.scalar_one()
 
-        emp_user_res = await db.execute(sqlalchemy.select(employees.c.user_id).where(employees.c.id == job.employee_id))
-        emp_user_id = emp_user_res.scalar_one_or_none()
+        emp_user_res = await db.execute(sqlalchemy.select(employees.c.user_id, employees.c.telegram_chat_id).where(employees.c.id == job.employee_id))
+        emp_info = emp_user_res.mappings().first()
+        emp_user_id = emp_info.user_id if emp_info else None
+        telegram_chat_id = emp_info.telegram_chat_id if emp_info else None # ดึง Chat ID มาใช้
 
+        tokens = []
         if emp_user_id:
             token_query = sqlalchemy.select(fcm_devices.c.device_token).where(fcm_devices.c.user_id == emp_user_id, fcm_devices.c.is_active == True)
             tokens = (await db.execute(token_query)).scalars().all()
+        
+        title = f"⚠️ มีงานต้องแก้ไข!"
+        body = f"งานตอนที่ {job.episode_number} ของเรื่อง '{comic_title}' ถูกส่งกลับให้แก้ไข"
 
+        if emp_user_id:
+            # --- [แก้ไข] ส่วน Telegram Notification ---
+            if telegram_chat_id:
+                # 📌 Logic เปรียบเทียบกิจกรรม
+                if job.get('last_telegram_activity') == current_activity:
+                    # กิจกรรมซ้ำ -> ตัดหัวข้อออก
+                    telegram_message = (
+                        f"⚠️ {body}"
+                    )
+                else:
+                    # กิจกรรมใหม่ -> แสดงหัวข้อเต็ม
+                    telegram_message = (
+                        f"*{title}*  "
+                        f"{body}"
+                    )
+                
+                await telegram_config.send_telegram_notification(
+                    telegram_chat_id, 
+                    telegram_message,
+                    bot_type='NOTIFY' # <<< Bot A
+                )
+                
+            # 3.1. ส่ง Real-time Update (Bridge App)
+            bridge_message = {
+                "type": "REVISION_REQUEST",
+                "title": title,
+                "body": body,
+                "job_id": job_id,
+            }
+            await notification_manager.send_personal_notification(emp_user_id, bridge_message)
+
+            # 3.2. ส่ง FCM (Push Notification สำรอง)
             if tokens:
                 firebase_config.send_notification(
                     tokens=tokens,
-                    title=f"⚠️ มีงานต้องแก้ไข!",
-                    body=f"งานตอนที่ {job.episode_number} ของเรื่อง '{comic_title}' ถูกส่งกลับให้แก้ไข"
+                    title=title,
+                    body=body,
+                    data={"type": "revision_request", "job_id": str(job_id)}
                 )
     except Exception as e:
         print(f"Failed to send revision notification: {e}")
 
     return {"message": "Job has been sent back for revision."}
+
 
 @router.post("/{job_id}/approve-archive", status_code=200)
 async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -253,17 +421,31 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # 1. ตรวจสอบความเป็นเจ้าของงาน
-    comic_res = await db.execute(sqlalchemy.select(comics.c.employer_id).where(comics.c.id == job.comic_id))
-    owner_id = comic_res.scalar_one_or_none()
+    # 📌 [สำคัญ] เพิ่มโค้ดนี้เพื่อดึงข้อมูล Comic ที่เกี่ยวข้อง
+    comic_res = await db.execute(sqlalchemy.select(comics).where(comics.c.id == job.comic_id))
+    comic = comic_res.mappings().first()
+    if not comic:
+        raise HTTPException(status_code=404, detail="Related Comic not found")
+    # -----------------------------------------------------
+    
+    owner_id_check_res = await db.execute(sqlalchemy.select(comics.c.employer_id).where(comics.c.id == job.comic_id))
+    owner_id = owner_id_check_res.scalar_one_or_none()
     if owner_id != current_user.id:
          raise HTTPException(status_code=403, detail="Not authorized to modify this job")
-
+     
     files_to_check = [
         job.employer_work_file, 
         job.employee_finished_file, 
         job.supplemental_file
     ]
+    
+    if job.episode_number > comic.last_updated_ep:
+        # อัปเดต last_updated_ep
+        await db.execute(
+            sqlalchemy.update(comics)
+            .where(comics.c.id == job.comic_id)
+            .values(last_updated_ep=job.episode_number)
+        )
     
     # ลบไฟล์งานหลัก, ไฟล์ที่พนักงานส่ง, และไฟล์เสริมที่มาพร้อมงาน
     for file_name in files_to_check:
@@ -308,7 +490,7 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
 
 @router.get("/{job_id}/supplemental-files/count", response_model=dict)
 async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    # 1. <<< แก้ไข Query ให้ดึงคอลัมน์ supplemental_file และ comment เข้ามาด้วย >>>
+    # ... (โค้ดเดิม) ...
     job_res = await db.execute(
         sqlalchemy.select(
             jobs.c.comic_id, 
@@ -333,6 +515,7 @@ async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depen
         "has_initial_file": has_initial_file,
         "total_files": count_later + (1 if has_initial_file else 0)
     }
+    
     
 
 @router.get("/{job_id}/supplemental-files/", response_model=List[JobSupplementalFile])
@@ -395,14 +578,21 @@ async def add_supplemental_file_to_job(
     current_user: User = Depends(auth.get_current_employer_user)
 ):
     # 1. ตรวจสอบว่า Job มีอยู่จริงและเป็นของ Employer คนนี้
+    # 📌 ปรับ Query: ดึง last_telegram_activity มาด้วย (เนื่องจากเป็น SELECT JOIN)
     job_res = await db.execute(
-        sqlalchemy.select(jobs.c.id, jobs.c.employee_id, comics.c.employer_id, comics.c.title, jobs.c.episode_number)
+        sqlalchemy.select(
+            jobs.c.id, jobs.c.employee_id, jobs.c.comic_id, jobs.c.episode_number, 
+            jobs.c.last_telegram_activity, # <<<<< [สำคัญ] เพิ่มคอลัมน์นี้ >>>>>
+            comics.c.employer_id, comics.c.title
+        )
         .select_from(jobs.join(comics, jobs.c.comic_id == comics.c.id))
         .where(jobs.c.id == job_id)
     )
     job = job_res.mappings().first()
     if not job or job.employer_id != current_user.id:
         raise HTTPException(status_code=404, detail="Job not found or not accessible")
+
+    current_activity = 'FILE_ADDED' # <<<<< เพิ่ม: กำหนดกิจกรรมปัจจุบัน >>>>>
 
     os.makedirs("job_files", exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
@@ -418,20 +608,68 @@ async def add_supplemental_file_to_job(
         uploaded_at=datetime.datetime.now().isoformat()
     )
     await db.execute(insert_query)
-    await db.commit() # <<< ต้องแน่ใจว่ามีการ commit
+    
+    # 📌 อัปเดตกิจกรรมล่าสุด
+    await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(last_telegram_activity=current_activity)) # <<<<< เพิ่ม >>>>>
+    await db.commit() 
     
     # 4. (Optional) ส่ง Notification ไปหาพนักงาน
     try:
-        emp_user_res = await db.execute(sqlalchemy.select(employees.c.user_id).where(employees.c.id == job.employee_id))
-        emp_user_id = emp_user_res.scalar_one_or_none()
+        emp_user_res = await db.execute(sqlalchemy.select(employees.c.user_id, employees.c.telegram_chat_id).where(employees.c.id == job.employee_id))
+        emp_info = emp_user_res.mappings().first()
+        emp_user_id = emp_info.user_id if emp_info else None
+        telegram_chat_id = emp_info.telegram_chat_id if emp_info else None # ดึง Chat ID มาใช้
+        
+        tokens = []
         if emp_user_id:
             token_query = sqlalchemy.select(fcm_devices.c.device_token).where(fcm_devices.c.user_id == emp_user_id, fcm_devices.c.is_active == True)
             tokens = (await db.execute(token_query)).scalars().all()
+
+        title = f"📁 คำแปลใหม่!"
+        body = f"ผู้จ้างได้เพิ่มคำแปลในงานตอนที่ {job.episode_number} ของเรื่อง '{job.title}'" # ใช้ job.title ที่ดึงมา
+        
+        if emp_user_id:
+            # --- [แก้ไข] ส่วน Telegram Notification ---
+            if telegram_chat_id:
+                 # 📌 Logic เปรียบเทียบกิจกรรม
+                if job.get('last_telegram_activity') == current_activity:
+                    # กิจกรรมซ้ำ -> ตัดหัวข้อออก
+                    # telegram_message = (
+                    #     f"📁 {body}"
+                    # )
+                    telegram_message = (
+                        f"*{title}*  "
+                        f"{body}"
+                    )
+                else:
+                    # กิจกรรมใหม่ -> แสดงหัวข้อเต็ม
+                    telegram_message = (
+                        f"*{title}*  "
+                        f"{body}"
+                    )
+                
+                await telegram_config.send_telegram_notification(
+                    telegram_chat_id, 
+                    telegram_message,
+                    bot_type='NOTIFY' # <<< Bot A
+                )
+                
+            # 4.1. ส่ง Real-time Update (Bridge App)
+            bridge_message = {
+                "type": "FILE_ADDED",
+                "title": title,
+                "body": body,
+                "job_id": job_id,
+            }
+            await notification_manager.send_personal_notification(emp_user_id, bridge_message)
+
+            # 4.2. ส่ง FCM (Push Notification สำรอง)
             if tokens:
                 firebase_config.send_notification(
                     tokens=tokens,
-                    title=f"ไฟล์ใหม่ในงาน: {job.title}",
-                    body=f"ผู้จ้างได้เพิ่มไฟล์ใหม่ในงานตอนที่ {job.episode_number}"
+                    title=title,
+                    body=body,
+                    data={"type": "file_added", "job_id": str(job_id)}
                 )
     except Exception as e:
         print(f"Failed to send notification about new file: {e}")

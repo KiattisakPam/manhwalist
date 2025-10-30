@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
 import json
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 
 from database import get_db
 from models import employees, jobs, comics, payrolls, users # <<< FIX: เพิ่ม users ตรงนี้
-from schemas import User, JobWithComicInfo
+from schemas import User, JobWithComicInfo, EmployeeUpdate
 import auth
 
 router = APIRouter(
@@ -16,6 +17,7 @@ router = APIRouter(
     tags=["Employees"],
     dependencies=[Depends(auth.get_current_user)]
 )
+
 
 @router.get("/")
 async def get_all_employees(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -26,23 +28,37 @@ async def get_all_employees(db: AsyncSession = Depends(get_db), current_user: Us
     result = await db.execute(query)
     return result.mappings().all()
 
-@router.delete("/{employee_id}", status_code=200)
+@router.delete("/{employee_id}", status_code=204) 
 async def delete_employee(employee_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
-    # 1. ค้นหาข้อมูลพนักงานเพื่อเอา user_id
-    emp_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
+    
+    emp_res = await db.execute(
+        sqlalchemy.select(employees.c.user_id, employees.c.employer_id)
+        .where(employees.c.id == employee_id)
+    )
     employee = emp_res.mappings().first()
+    
     if not employee or employee.employer_id != current_user.id:
         raise HTTPException(status_code=404, detail="Employee not found or not accessible")
 
     user_id_to_delete = employee.user_id
 
-    # 2. ทำการลบข้อมูลออกจากตาราง 'users'
-    # (ข้อมูลใน employees, jobs, payrolls ที่ผูกกับ user_id นี้จะถูกลบตามไปด้วยเพราะ ON DELETE CASCADE)
-    delete_query = sqlalchemy.delete(users).where(users.c.id == user_id_to_delete)
-    await db.execute(delete_query)
+    # [FIX: CRITICAL] 1. ลบ Employee Record ก่อน (เพื่อให้ Cascade ไป Jobs, Chat, Payrolls)
+    delete_emp_query = sqlalchemy.delete(employees).where(employees.c.id == employee_id)
+    await db.execute(delete_emp_query)
     
+    print(f"DEBUG_DELETE: Deleted Employee ID {employee_id}. Cascade should handle Jobs/Chat/Payrolls.")
+
+    if user_id_to_delete:
+        # 2. ลบ User Record (ถ้ามี)
+        delete_user_query = sqlalchemy.delete(users).where(users.c.id == user_id_to_delete)
+        await db.execute(delete_user_query)
+        print(f"DEBUG_DELETE: Also deleted User ID {user_id_to_delete}.")
+        
+    # 3. COMMIT และล้าง CACHE
     await db.commit()
-    return {"message": "Employee and all associated data have been permanently deleted."}
+    db.expunge_all() # บังคับให้ Session ล้าง Cache
+    
+    return Response(status_code=204)
 
 
 async def _get_summary_logic(employee_id: int, db: AsyncSession):
@@ -94,6 +110,31 @@ async def get_my_unpaid_summary(db: AsyncSession = Depends(get_db), current_user
 @router.get("/{employee_id}/unpaid-summary")
 async def get_unpaid_summary(employee_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
     return await _get_summary_logic(employee_id, db)
+
+@router.put("/{employee_id}")
+async def update_employee(
+    employee_id: int, 
+    employee_update: EmployeeUpdate, # <<< ใช้ Model ที่มี telegram_chat_id
+    db: AsyncSession = Depends(get_db), 
+    current_user: User = Depends(auth.get_current_employer_user)
+):
+    """ผู้จ้างอัปเดตข้อมูลพนักงาน (ชื่อและ Telegram Chat ID)"""
+    # 1. ค้นหาและตรวจสอบสิทธิ์
+    emp_res = await db.execute(sqlalchemy.select(employees).where(employees.c.id == employee_id))
+    employee = emp_res.mappings().first()
+    if not employee or employee.employer_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Employee not found or not accessible")
+
+    update_data = employee_update.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    # 2. อัปเดตข้อมูลในตาราง employees
+    # (โค้ดนี้จะอัปเดตทั้ง 'name' และ 'telegram_chat_id' ถ้ามีการส่งค่ามา)
+    await db.execute(sqlalchemy.update(employees).where(employees.c.id == employee_id).values(**update_data))
+    
+    await db.commit()
+    return {"message": "Employee details updated successfully"}
 
 @router.get("/{employee_id}/latest-payroll")
 async def get_latest_payroll(employee_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
