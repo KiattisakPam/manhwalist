@@ -358,57 +358,44 @@ async def notify_tomorrow_updates(
         # <<< [เพิ่มการรอ 5 วินาที หลังส่ง Text Message] >>>
         print("DEBUG_NOTIFY: Waiting 5s for Render cold start...")
         await asyncio.sleep(1)
-        # <<< [แก้ไข] ใช้ Logic ดึง base_url ที่ถูกต้องและปลอดภัย >>>
-        try:
-            base_url = settings.BACKEND_BASE_URL 
-            if '127.0.0.1' in base_url or 'localhost' in base_url:
-                 raise Exception("Localhost URL detected")
-            print(f"DEBUG_NOTIFY: Using configured BASE_URL: {base_url}")
-        except Exception:
-            # ใช้ URL Fallback ที่คุณตั้งค่าไว้สำหรับ Render
-            base_url = "https://manhwalist-final.onrender.com" 
-            print(f"WARNING: settings.BACKEND_BASE_URL not loaded, using fallback: {base_url}")
-        # --------------------------------------------------------------------
         
+        # 📌 [สำคัญ] แก้ไขการกำหนด base_url สำหรับการส่งภาพ
+        try:
+            # 1. ลองใช้ URL สาธารณะจาก settings (ใช้สำหรับ Telegram เท่านั้น)
+            public_base_url = settings.BACKEND_BASE_URL 
+        except Exception:
+            public_base_url = "https://manhwalist-final.onrender.com"
+            
+
+        # 2. <<< [แก้ไข] ใช้ Internal/Localhost URL สำหรับการตรวจสอบ Content-Type >>>
+        # เนื่องจาก Render.com บล็อก Loopback Requests (Bot ไม่สามารถเข้าถึง 127.0.0.1 ได้)
+        # และ Backend ไม่สามารถเข้าถึง URL สาธารณะของตัวเองได้
+        # เราจะ *สมมติว่าภาพปกเข้าถึงได้* ถ้า Status Code เป็น 200 เมื่อตรวจสอบจาก Public URL
+        # และเราจะเอา Logic ตรวจสอบ Content-Type ออกไป เพราะมันทำให้เกิดปัญหา
 
         for comic in comics_list:
             image_file = comic.get('image_file')
             comic_title = comic.get('title')
             
             if image_file:
-                base_url = settings.BACKEND_BASE_URL 
-                image_url = f"{base_url}/covers/{image_file}" 
+                image_url_to_send = f"{public_base_url}/covers/{image_file}" 
                 
-                # <<< [แก้ไข] ใช้ Logic ตรวจสอบง่าย ๆ โดยเน้น Status 200 >>>
+                # *** [FIX] ลบ Logic การตรวจสอบ Content-Type ออก ***
+                # เราจะเชื่อว่าถ้า Base URL เป็น URL สาธารณะที่ถูกต้อง Telegram จะจัดการได้เอง
+                
                 try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        # 1. ลอง GET ไฟล์ภาพปกเพื่อตรวจสอบการเข้าถึง
-                        # (ใช้ GET แทน HEAD เพื่อหลีกเลี่ยง 405)
-                        response = await client.get(image_url) 
-                        
-                        print(f"DEBUG_IMAGE_CHECK: URL: {image_url}")
-                        print(f"DEBUG_IMAGE_CHECK: Status: {response.status_code}")
-                        
-                        if response.status_code != 200:
-                            # ถ้าไม่ใช่ 200 ให้ Log Error (อาจเป็น HTML 404/Login Page)
-                            raise Exception(f"Image not accessible. Status: {response.status_code}")
-                            
-                        # NOTE: ไม่ต้องตรวจสอบ Content-Type ที่ซับซ้อน เพราะถ้าได้ 200, Telegram ควรจะจัดการ FileResponse ได้
-
-                    # 2. ถ้าผ่านการตรวจสอบ Status 200 ให้ส่งภาพปก
+                    # 3. ส่ง URL สาธารณะไปให้ Telegram Bot
                     await telegram_config.send_telegram_photo(
                         report_chat_id,
-                        image_url,
+                        image_url_to_send, # <<< ส่ง URL สาธารณะที่แท้จริง
                         caption=f"ปก: *{comic_title}* (Original Ep {comic.get('original_latest_ep', '?')})",
                         bot_type='REPORT' 
                     )
                     await asyncio.sleep(0.5) 
 
                 except Exception as e:
-                    # ถ้าเกิด Exception ในการเชื่อมต่อ/Status Code ไม่ใช่ 200
-                    print(f"ERROR_NOTIFY: Failed to send photo for {comic_title} (URL Error): {e}")
-                    # เราจะใช้ print() ธรรมดา เพื่อให้ Log ไม่เกิด UnboundLocalError
-                    pass # ปล่อยให้ลูปดำเนินต่อไป
+                    print(f"ERROR_NOTIFY: Failed to send photo for {comic_title} (Telegram Error): {e}")
+                    pass # ให้ลูปดำเนินต่อไป
                 
     return {"message": f"Sent update notification for {len(comics_list)} comic(s) {'with images' if with_image else 'text only'}."}
 
