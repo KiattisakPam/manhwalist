@@ -15,7 +15,7 @@ from schemas import User
 # --- Authentication Configuration ---
 SECRET_KEY = "a_very_secret_key_change_this_in_production"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 วัน
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365 # 365 วัน
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")

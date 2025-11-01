@@ -6,7 +6,7 @@ import datetime
 
 from database import get_db
 from models import users, employees
-from schemas import Token, User
+from schemas import Token, User, EmployerUpdate
 import auth
 from config import settings
 
@@ -155,4 +155,26 @@ async def change_employee_password(
     
     await db.commit()
     return {"message": "Employee password updated successfully"}
+
+@router.put("/me/report-chat-id", status_code=200)
+async def update_employer_report_chat_id(
+    payload: EmployerUpdate, # รับค่าจาก Schema
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(auth.get_current_employer_user) # ต้องเป็น Employer เท่านั้น
+):
+    """อัปเดต Telegram Report Chat ID ของผู้จ้างที่เข้าสู่ระบบ"""
+    
+    # ล้างค่า Chat ID ถ้าส่งค่าว่างมา
+    chat_id_to_save = payload.telegram_report_chat_id.strip() if payload.telegram_report_chat_id else None
+    if chat_id_to_save == "":
+        chat_id_to_save = None
+
+    await db.execute(
+        sqlalchemy.update(users).where(users.c.id == current_user.id).values(
+            telegram_report_chat_id=chat_id_to_save
+        )
+    )
+    
+    await db.commit()
+    return {"message": "Telegram Report Chat ID updated successfully"}
 

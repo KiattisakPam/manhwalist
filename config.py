@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     # --- เพิ่มบรรทัดนี้ ---
     INVITATION_CODE: str = "DEFAULT_SECRET_CHANGE_ME"
     
+    BACKEND_BASE_URL: str = "http://127.0.0.1:8000"
+    
     TELEGRAM_BOT_TOKEN_NOTIFY: Optional[str] = None # <<< Bot A
     TELEGRAM_BOT_TOKEN_REPORT: Optional[str] = None # <<< Bot B
 

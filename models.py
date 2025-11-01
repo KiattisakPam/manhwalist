@@ -7,6 +7,7 @@ users = sqlalchemy.Table(
     sqlalchemy.Column("email", sqlalchemy.String, unique=True, index=True, nullable=False),
     sqlalchemy.Column("hashed_password", sqlalchemy.String, nullable=False),
     sqlalchemy.Column("role", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("telegram_report_chat_id", sqlalchemy.String, nullable=True),
 )
 
 comics = sqlalchemy.Table(

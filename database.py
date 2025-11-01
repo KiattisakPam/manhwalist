@@ -25,6 +25,7 @@ metadata = sqlalchemy.MetaData()
 # --- Dependency ---
 async def get_db() -> AsyncSession:
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    AsyncSessionLocal = async_session
     async with async_session() as session:
         yield session
         

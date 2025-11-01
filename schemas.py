@@ -140,3 +140,5 @@ class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     
+class EmployerUpdate(BaseModel):
+    telegram_report_chat_id: Optional[str] = None

@@ -90,7 +90,7 @@ async def websocket_endpoint(
                 print(f"WARNING:  Received message with no 'content' from {current_user.email}. Data: {data}")
                 continue
 
-            now = datetime.datetime.now().isoformat()
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
             insert_query = sqlalchemy.insert(chat_messages).values(
                 room_id=room_id, sender_id=current_user.id, message_type=message_type,
@@ -239,7 +239,7 @@ async def find_or_create_room_for_employer(
         room_id = room.id
     else:
         # *** FIX: ถ้าไม่พบห้อง ให้สร้างห้องใหม่ทันที (ตามตรรกะ Find or Create) ***
-        now = datetime.datetime.now().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         insert_query = sqlalchemy.insert(chat_rooms).values(
             employer_id=current_user.id,
             employee_id=participant_employee_id,
@@ -267,7 +267,7 @@ async def find_or_create_room_for_employer(
                 sender_id=current_user.id,
                 message_type="context", 
                 content=context_content,
-                sent_at=datetime.datetime.now().isoformat()
+                sent_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
             )
             await db.execute(insert_query)
         
@@ -411,7 +411,7 @@ async def find_or_create_room_for_employee(
         room_id = room.id
     else:
         # *** FIX: ถ้าไม่พบห้อง (ถูกลบไป) ให้สร้างห้องใหม่ทันที (เหมือน Employer) ***
-        now = datetime.datetime.now().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         insert_query = sqlalchemy.insert(chat_rooms).values(
             employer_id=employee.employer_id,
             employee_id=employee.id,
@@ -441,7 +441,7 @@ async def find_or_create_room_for_employee(
                 sender_id=current_user.id,
                 message_type="context",
                 content=context_content,
-                sent_at=datetime.datetime.now().isoformat()
+                sent_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
             )
             await db.execute(insert_query)
         
@@ -482,7 +482,7 @@ async def upload_chat_file(
     current_user: User = Depends(auth.get_current_user) # <<< เพิ่ม
 ):
     os.makedirs("chat_files", exist_ok=True)
-    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
     file_name = f"chat_{room_id}_{timestamp}_{file.filename}"
     file_path = os.path.join("chat_files", file_name)
     with open(file_path, "wb") as buffer:
