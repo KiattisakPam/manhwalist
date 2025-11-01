@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
 import datetime
-import pytz
 import os
 import shutil
 from typing import Optional, List
