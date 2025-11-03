@@ -13,4 +13,6 @@ python-jose[cryptography]
 aiosqlite
 email-validator
 firebase-admin
+httpx # <<< สำหรับ telegram_config.py
+requests-toolbelt # <<< สำหรับ telegram_config.py
 

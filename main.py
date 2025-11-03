@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles # <<< เพิ่มการนำเข้า
 import datetime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
-
 from database import engine, metadata
 from models import users
 from auth import get_password_hash
@@ -30,6 +30,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Static Files Configuration ---
+# ✅ เพิ่มการตั้งค่าสำหรับ Covers, Job Files, และ Chat Files
+app.mount("/covers", StaticFiles(directory="covers"), name="covers") 
+app.mount("/job-files", StaticFiles(directory="job_files"), name="job_files") 
+app.mount("/chat-files", StaticFiles(directory="chat_files"), name="chat_files") 
+# ----------------------------------
+
 
 # --- Include Routers ---
 app.include_router(usersRouter.router)

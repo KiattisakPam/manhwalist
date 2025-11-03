@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
 import datetime
 from datetime import timezone, timedelta
+import pathlib
 import os
 import shutil
 from typing import List
@@ -16,6 +17,9 @@ import auth
 import httpx
 
 from config import settings
+
+BASE_DIR = pathlib.Path(__file__).parent.parent 
+COVERS_DIR = BASE_DIR / "covers"
 
 router = APIRouter(
     prefix="/comics",
@@ -339,63 +343,77 @@ async def notify_tomorrow_updates(
 
     final_message = "\n".join(message_parts)
     
-    # 5. ส่งข้อความสรุป (เสมอ)
-    print(f"DEBUG_NOTIFY: Attempting to send text message (Bot B) to Chat ID: {report_chat_id}")
-    try:
-        await telegram_config.send_telegram_notification(
-            report_chat_id, 
-            final_message,
-            bot_type='REPORT' 
-        )
-        print("DEBUG_NOTIFY: Text notification sent successfully.")
-    except Exception as e:
-        print(f"ERROR_NOTIFY: Failed to send text notification: {e}")
-
-    # 6. Logic การส่งภาพปกตามไป (ถ้า with_image=True)
+    # 5. Logic การส่งภาพปกตามไป (ถ้า with_image=True)
     if with_image:
-        print("DEBUG_NOTIFY: Sending images for tomorrow's updates.")
+        print("DEBUG_NOTIFY: Sending images as a media group.")
         
-        # <<< [เพิ่มการรอ 5 วินาที หลังส่ง Text Message] >>>
-        print("DEBUG_NOTIFY: Waiting 5s for Render cold start...")
-        await asyncio.sleep(1)
+        # หน่วงเวลาเล็กน้อย
+        await asyncio.sleep(1) 
         
-        # 📌 [สำคัญ] แก้ไขการกำหนด base_url สำหรับการส่งภาพ
+        photo_urls_list = []
+        
+        # ดึง Base URL (จาก settings)
         try:
-            # 1. ลองใช้ URL สาธารณะจาก settings (ใช้สำหรับ Telegram เท่านั้น)
-            public_base_url = settings.BACKEND_BASE_URL 
+            base_url = settings.BACKEND_BASE_URL 
         except Exception:
-            public_base_url = "https://manhwalist-final.onrender.com"
-            
-
-        # 2. <<< [แก้ไข] ใช้ Internal/Localhost URL สำหรับการตรวจสอบ Content-Type >>>
-        # เนื่องจาก Render.com บล็อก Loopback Requests (Bot ไม่สามารถเข้าถึง 127.0.0.1 ได้)
-        # และ Backend ไม่สามารถเข้าถึง URL สาธารณะของตัวเองได้
-        # เราจะ *สมมติว่าภาพปกเข้าถึงได้* ถ้า Status Code เป็น 200 เมื่อตรวจสอบจาก Public URL
-        # และเราจะเอา Logic ตรวจสอบ Content-Type ออกไป เพราะมันทำให้เกิดปัญหา
-
+            # ใช้ URL สำรองถ้าหาไม่เจอ
+            base_url = "http://127.0.0.1:8000" 
+        
         for comic in comics_list:
             image_file = comic.get('image_file')
-            comic_title = comic.get('title')
-            
             if image_file:
-                image_url_to_send = f"{public_base_url}/covers/{image_file}" 
+                # สร้าง URL สาธารณะของภาพปก
+                image_url = f"{base_url}/covers/{image_file}" 
+                photo_urls_list.append(image_url)
+        
+        # 📌 [สำคัญ] ถ้ามีภาพให้ส่งเป็น Media Group (อัลบั้ม)
+        if photo_urls_list:
+            # 1. ลองส่ง Media Group ก่อน
+            group_success = await telegram_config.send_telegram_media_group(
+                report_chat_id,
+                photo_urls_list,
+                bot_type='REPORT',
+                caption=final_message # ใช้ข้อความสรุปเป็น caption
+            )
+            
+            if group_success:
+                 print(f"DEBUG_NOTIFY: Sent {len(photo_urls_list)} images as media group.")
+            else:
+                # 2. ถ้า Media Group ล้มเหลว ให้ลองส่งทีละภาพ (Fallback)
+                print("WARNING: Media Group failed (URL inaccessible or error). Falling back to single photo messages.")
                 
-                # *** [FIX] ลบ Logic การตรวจสอบ Content-Type ออก ***
-                # เราจะเชื่อว่าถ้า Base URL เป็น URL สาธารณะที่ถูกต้อง Telegram จะจัดการได้เอง
+                # ส่งข้อความสรุปแบบ Text ไปก่อน
+                await telegram_config.send_telegram_notification(
+                    report_chat_id, 
+                    final_message,
+                    bot_type='REPORT' 
+                )
                 
-                try:
-                    # 3. ส่ง URL สาธารณะไปให้ Telegram Bot
-                    await telegram_config.send_telegram_photo(
-                        report_chat_id,
-                        image_url_to_send, # <<< ส่ง URL สาธารณะที่แท้จริง
-                        caption=f"ปก: *{comic_title}* (Original Ep {comic.get('original_latest_ep', '?')})",
-                        bot_type='REPORT' 
+                # ส่งภาพปกทีละภาพ
+                for i, url in enumerate(photo_urls_list):
+                     await telegram_config.send_telegram_photo(
+                        report_chat_id, 
+                        url,
+                        caption=f"รูปปก {i+1}" if i==0 else None,
+                        bot_type='REPORT'
                     )
-                    await asyncio.sleep(0.5) 
+                print(f"DEBUG_NOTIFY: Sent {len(photo_urls_list)} images as single photos (fallback).")
+            
+        return {"message": f"Sent update notification for {len(comics_list)} comic(s) as media group/single photos."}
 
-                except Exception as e:
-                    print(f"ERROR_NOTIFY: Failed to send photo for {comic_title} (Telegram Error): {e}")
-                    pass # ให้ลูปดำเนินต่อไป
-                
-    return {"message": f"Sent update notification for {len(comics_list)} comic(s) {'with images' if with_image else 'text only'}."}
-
+    # 6. ถ้า with_image=False ให้ส่งแค่ข้อความสรุป
+    else:
+        print(f"DEBUG_NOTIFY: Attempting to send text message (Bot B) to Chat ID: {report_chat_id}")
+        try:
+            await telegram_config.send_telegram_notification(
+                report_chat_id, 
+                final_message,
+                bot_type='REPORT' 
+            )
+            print("DEBUG_NOTIFY: Text notification sent successfully.")
+        except Exception as e:
+            print(f"ERROR_NOTIFY: Failed to send text notification: {e}")
+            
+        return {"message": f"Sent update notification for {len(comics_list)} comic(s) (text only)."}
+    
+    

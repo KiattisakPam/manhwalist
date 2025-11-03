@@ -7,8 +7,8 @@ router = APIRouter(
     tags=["Files"]
 )
 
-BASE_DIR = pathlib.Path(__file__).parent.parent 
-COVERS_DIR = BASE_DIR / "covers" # Path: backend/covers
+BASE_DIR = pathlib.Path(__file__).parent.parent.parent # ถ้า main.py อยู่ใน src/
+COVERS_DIR = BASE_DIR / "covers" # Path: /covers (ถ้า covers อยู่ใน root เดียวกับ main.py)
 
 @router.get("/covers/{file_name}")
 async def get_cover_image(file_name: str):
@@ -16,13 +16,9 @@ async def get_cover_image(file_name: str):
     file_path = COVERS_DIR / file_name
     
     if not file_path.is_file():
-        # ลองใช้ os.path.join เป็น Fallback (เพื่อความเข้ากันได้)
-        fallback_path = os.path.join("covers", file_name)
-        if not os.path.exists(fallback_path):
-             raise HTTPException(status_code=404, detail="Image not found")
-        file_path = fallback_path
+        raise HTTPException(status_code=404, detail=f"Image not found at {file_path}")
     
-    # NOTE: FileResponse ใน FastAPI/Starlette มักจะเพิ่ม Header ที่ถูกต้องให้อยู่แล้ว
+    # [สำคัญ] FileResponse ควรทำงานได้ แต่ถ้าไม่ทำงาน ให้ตรวจสอบ FileExtension
     return FileResponse(file_path)
 
 

@@ -22,9 +22,13 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     
     access_token_expires = datetime.timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
-    user_model = User.model_validate(user)
+    
+    # 📌 [FIX] แปลง result row เป็น dict เพื่อให้ Pydantic validate ได้ถูกต้อง
+    user_data = dict(user) 
+    # User Schema (Pydantic) จะรวมฟิลด์ telegram_report_chat_id โดยอัตโนมัติ
+    user_model = User.model_validate(user_data) 
+    
     return {"access_token": access_token, "token_type": "bearer", "user": user_model}
-
 
 @router.post("/register/employer", status_code=201, response_model=User)
 async def register_employer(
@@ -53,7 +57,8 @@ async def register_employer(
     created_user = {
         "id": result.inserted_primary_key[0],
         "email": email,
-        "role": "employer"
+        "role": "employer",
+        "telegram_report_chat_id": None # <<< ใส่ None เพื่อให้ model validate ผ่าน
     }
     return created_user
 

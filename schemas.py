@@ -9,6 +9,7 @@ class User(BaseModel):
     id: int
     email: EmailStr
     role: str
+    telegram_report_chat_id: Optional[str] = None
 
 class UserCreate(BaseModel):
     email: EmailStr
