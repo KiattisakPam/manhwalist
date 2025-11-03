@@ -15,7 +15,7 @@ from models import comics, jobs, employees, users
 from schemas import ComicCreate, ComicWithCompletion, ComicUpdate, EpisodeStatus, User
 import auth
 import httpx
-
+import urllib.parse
 from config import settings
 
 BASE_DIR = pathlib.Path(__file__).parent.parent 
