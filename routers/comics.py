@@ -17,9 +17,10 @@ import auth
 import httpx
 import urllib.parse
 from config import settings
+import firebase_storage_client
 
 BASE_DIR = pathlib.Path(__file__).parent.parent 
-COVERS_DIR = BASE_DIR / "covers"
+# COVERS_DIR = BASE_DIR / "covers"
 
 router = APIRouter(
     prefix="/comics",
@@ -28,16 +29,27 @@ router = APIRouter(
 )
 
 
-
+# 📌 [FIX] 1. อัปโหลดภาพปก
 @router.post("/upload-image/", tags=["Files"])
 async def upload_image(file: UploadFile = File(...), current_user: User = Depends(auth.get_current_employer_user)):
-    os.makedirs("covers", exist_ok=True)
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
+    
+    # 📌 [FIX] สร้างชื่อ Blob (รวม covers/ เพื่อแยก Folder ใน Storage)
     new_file_name = f"cover_{timestamp}_{file.filename}"
-    file_path = os.path.join("covers", new_file_name)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    return {"file_name": new_file_name}
+    blob_name = f"covers/{new_file_name}" 
+    
+    # 📌 [FIX] อ่าน Content และอัปโหลดไป Firebase Storage
+    file_bytes = await file.read()
+
+    await firebase_storage_client.upload_file_to_firebase(
+        file_bytes, 
+        blob_name,
+        content_type=file.content_type
+    )
+    
+    return {"file_name": blob_name} # <<< [FIX] คืนค่าชื่อ Blob (covers/filename)
+
+
 
 @router.get("/", response_model=List[ComicWithCompletion])
 async def get_all_comics(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -168,19 +180,20 @@ async def delete_comic(comic_id: int, db: AsyncSession = Depends(get_db), curren
 
     # 2. ลบไฟล์ภาพปกจริง (ถ้ามี)
     if comic_to_delete.image_file:
-        file_path = os.path.join("covers", comic_to_delete.image_file)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                print(f"WARNING: Failed to delete cover image {file_path}: {e}")
+        blob_name = comic_to_delete.image_file # image_file คือ blob_name
+        try:
+            # 📌 [FIX] ลบจาก Firebase Storage
+            await firebase_storage_client.delete_file_from_firebase(blob_name) 
+        except Exception as e:
+            print(f"WARNING: Failed to delete cover image from Firebase: {e}")
 
-    # 3. ลบ Comic Record (การลบนี้จะลบ Jobs, Chat Rooms, Employees ที่เกี่ยวข้องผ่าน ON DELETE CASCADE)
+    # 3. ลบ Comic Record 
     delete_query = sqlalchemy.delete(comics).where(comics.c.id == comic_id)
     await db.execute(delete_query)
     await db.commit()
 
     return {"message": "Comic and all associated data deleted successfully"}
+
 
 @router.post("/auto-update", status_code=200)
 async def auto_update_comics(db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
@@ -278,7 +291,7 @@ async def notify_tomorrow_updates(
 ):
     """
     ตรวจสอบการ์ตูนที่จะอัปเดตวันพรุ่งนี้ และส่ง Telegram Notification (Report Bot)
-    Endpoint นี้ถูกเรียกโดย Frontend เมื่อผู้จ้างกดปุ่ม
+    ใช้ File System Read และ Document Upload เพื่อส่งไฟล์ภาพเป็นชื่อเรื่อง
     """
     employer_id = current_user.id
     
@@ -295,7 +308,7 @@ async def notify_tomorrow_updates(
         print(f"WARNING: Report Chat ID not found for employer {employer_id}")
         return {"message": "Employer Report Chat ID not set. Skipping notification."}
 
-    # 2. คำนวณวันพรุ่งนี้ (อิงตามเวลาไทย GMT+7 เพื่อเปรียบเทียบกับตารางงาน)
+    # 2. คำนวณวันพรุ่งนี้
     THAI_TZ = timezone(timedelta(hours=7)) 
     now_thai = datetime.datetime.now(THAI_TZ)
     tomorrow_date = now_thai.date() + datetime.timedelta(days=1)
@@ -327,7 +340,7 @@ async def notify_tomorrow_updates(
     if not comics_list:
         return {"message": "No comics scheduled for update tomorrow."}
 
-    # 4. เตรียมข้อความสรุป
+    # 4. เตรียมข้อความสรุป (Final Message)
     message_parts = [
         f"🌟 *แจ้งเตือนอัปเดตวันพรุ่งนี้ ({tomorrow_date.strftime('%d/%m')})* 🌟",
         f"รายการการ์ตูน ({len(comics_list)} เรื่อง) ที่มีกำหนดอัปเดต:",
@@ -343,66 +356,56 @@ async def notify_tomorrow_updates(
 
     final_message = "\n".join(message_parts)
     
-    # 5. Logic การส่งภาพปกตามไป (ถ้า with_image=True)
+    # 5. Logic การส่ง
     if with_image:
-        print("DEBUG_NOTIFY: Sending images as a media group.")
+        print("DEBUG_NOTIFY: Sending images (using File System Read and Document Upload).")
         
-        # หน่วงเวลาเล็กน้อย
         await asyncio.sleep(1) 
         
-        photo_urls_list = []
+        # 📌 [FIX] ใช้ settings.BACKEND_BASE_URL (ไม่ใช้แล้วเพราะเปลี่ยนเป็น File Read)
+        # base_url = settings.BACKEND_BASE_URL.replace("http://", "https://") 
         
-        
-        base_url = settings.BACKEND_BASE_URL.replace("http://", "https://")
-        
-        for comic in comics_list:
-            image_file = comic.get('image_file')
-            if image_file:
-                # 📌 [FIX 2] เข้ารหัสชื่อไฟล์ด้วย urllib.parse.quote()
-                encoded_file_name = urllib.parse.quote(image_file) 
-                
-                # 2. สร้าง URL สาธารณะของภาพปก
-                image_url = f"{base_url}/covers/{encoded_file_name}" 
-                photo_urls_list.append(image_url)
-                
-                # 📌 [DEBUG LOG] เพิ่มการพิมพ์ URL ที่ถูกสร้าง (เพื่อให้เห็นใน Log ต่อไป)
-                print(f"DEBUG_NOTIFY: Image URL created: {image_url}")
-                
-                
-        # 📌 [สำคัญ] ถ้ามีภาพให้ส่งเป็น Media Group (อัลบั้ม)
-        if photo_urls_list:
-            # 1. ลองส่ง Media Group ก่อน
-            group_success = await telegram_config.send_telegram_media_group(
-                report_chat_id,
-                photo_urls_list,
-                bot_type='REPORT',
-                caption=final_message # ใช้ข้อความสรุปเป็น caption
-            )
+        # 5.2. ส่งภาพปกทีละภาพ (Binary Document Upload)
+        for i, comic in enumerate(comics_list): 
+            image_file_name_with_path = comic.get('image_file') # image_file คือ blob_name (covers/filename)
             
-            if group_success:
-                 print(f"DEBUG_NOTIFY: Sent {len(photo_urls_list)} images as media group.")
-            else:
-                # 2. ถ้า Media Group ล้มเหลว ให้ลองส่งทีละภาพ (Fallback)
-                print("WARNING: Media Group failed (URL inaccessible or error). Falling back to single photo messages.")
+            if image_file_name_with_path:
                 
-                # ส่งข้อความสรุปแบบ Text ไปก่อน
-                await telegram_config.send_telegram_notification(
-                    report_chat_id, 
-                    final_message,
-                    bot_type='REPORT' 
+                # 📌 [FIX] ดึงชื่อไฟล์และนามสกุลที่ถูกต้อง
+                original_file_name = os.path.basename(image_file_name_with_path)
+                original_extension = os.path.splitext(original_file_name)[1]
+                
+                # ใช้ชื่อเรื่อง + นามสกุลไฟล์เดิม
+                telegram_file_name = f"{comic['title']}{original_extension}" 
+                
+                # 📌 [FIX] สร้าง Caption
+                caption_details = (
+                    f"*{comic['title']}*\n"
+                    f"ล่าสุด: Ep {comic['last_updated_ep']}\n"
+                    f"ต้นฉบับ: Ep {comic['original_latest_ep']}\n"
+                    f"กำหนด: {comic['update_type']} ({comic['update_value']})"
                 )
                 
-                # ส่งภาพปกทีละภาพ
-                for i, url in enumerate(photo_urls_list):
-                     await telegram_config.send_telegram_photo(
+                try:
+                    # 1. อ่าน Binary Data จาก Firebase Storage (File System Read)
+                    image_bytes = await firebase_storage_client.download_file_from_firebase(image_file_name_with_path)
+                    
+                    if image_bytes is None:
+                        raise FileNotFoundError(f"Cover file not found in Firebase Storage: {image_file_name_with_path}")
+                        
+                    # 2. อัปโหลด Binary Data ไปยัง Telegram เป็น Document
+                    await telegram_config.send_telegram_document_in_memory(
                         report_chat_id, 
-                        url,
-                        caption=f"รูปปก {i+1}" if i==0 else None,
+                        image_bytes,
+                        filename=telegram_file_name, 
+                        caption=caption_details, 
                         bot_type='REPORT'
                     )
-                print(f"DEBUG_NOTIFY: Sent {len(photo_urls_list)} images as single photos (fallback).")
-            
-        return {"message": f"Sent update notification for {len(comics_list)} comic(s) as media group/single photos."}
+                    print(f"INFO: Successfully sent document {i+1} for {comic['title']}.")
+                except Exception as e:
+                    print(f"ERROR: Failed to send document {i+1} (Firebase Read Error): {e}")
+        
+        return {"message": "Sent update notification... (via file read upload)."}
     
     # 6. ถ้า with_image=False ให้ส่งแค่ข้อความสรุป
     else:
@@ -419,4 +422,6 @@ async def notify_tomorrow_updates(
             
         return {"message": f"Sent update notification for {len(comics_list)} comic(s) (text only)."}
     
+    
+
     

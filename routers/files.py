@@ -1,14 +1,12 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 import os
 import pathlib
+import firebase_storage_client
 
 router = APIRouter(
     tags=["Files"]
 )
-
-BASE_DIR = pathlib.Path(__file__).parent.parent.parent # ถ้า main.py อยู่ใน src/
-COVERS_DIR = BASE_DIR / "covers" # Path: /covers (ถ้า covers อยู่ใน root เดียวกับ main.py)
 
 @router.get("/covers/{file_name}")
 async def get_cover_image(file_name: str):
@@ -21,19 +19,47 @@ async def get_cover_image(file_name: str):
     # [สำคัญ] FileResponse ควรทำงานได้ แต่ถ้าไม่ทำงาน ให้ตรวจสอบ FileExtension
     return FileResponse(file_path)
 
-
 @router.get("/job-files/{file_name}")
 async def get_job_file(file_name: str):
-    file_path = os.path.join("job_files", file_name)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path)
-
-# --- เพิ่ม Endpoint นี้เข้าไป ---
-@router.get("/chat_files/{file_name}")
+    # file_name ในที่นี้คือชื่อไฟล์ที่ถูกส่งมาใน Endpoint, แต่ blob_name ต้องรวม Folder ด้วย
+    blob_name = f"job_files/{file_name}" 
+    
+    try:
+        # 📌 [FIX] ดาวน์โหลดไฟล์ Binary จาก Firebase
+        file_bytes = await firebase_storage_client.download_file_from_firebase(blob_name)
+        
+        if file_bytes is None:
+            raise HTTPException(status_code=404, detail="File not found in storage.")
+            
+        # 📌 [FIX] ใช้ StreamingResponse ส่งไฟล์ Binary กลับไป
+        return StreamingResponse(
+            content=iter([file_bytes]),
+            media_type="application/octet-stream", # หรือตามประเภทไฟล์
+            headers={"Content-Disposition": f"attachment; filename={file_name}"}
+        )
+    except Exception as e:
+        print(f"ERROR: Failed to stream file {blob_name} from Firebase: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during file retrieval.")
+    
+    
+@router.get("/chat-files/{file_name}")
 async def get_chat_file(file_name: str):
-    file_path = os.path.join("chat_files", file_name)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path)
+    blob_name = f"chat_files/{file_name}" 
+    
+    try:
+        file_bytes = await firebase_storage_client.download_file_from_firebase(blob_name)
+        
+        if file_bytes is None:
+            raise HTTPException(status_code=404, detail="File not found in storage.")
+            
+        return StreamingResponse(
+            content=iter([file_bytes]),
+            media_type="application/octet-stream", 
+            headers={"Content-Disposition": f"attachment; filename={file_name}"}
+        )
+    except Exception as e:
+        print(f"ERROR: Failed to stream file {blob_name} from Firebase: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during file retrieval.")
+    
+    
 

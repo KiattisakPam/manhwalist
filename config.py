@@ -5,13 +5,11 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
-    # 'DATABASE_URL' จะถูกอ่านจาก Environment Variable ในระบบโฮสต์
-    # ถ้าไม่มีค่า (เช่น รันบนเครื่อง local โดยไม่มี .env) จะใช้ค่า default
+    # 📌 [FIX] ต้องตั้งค่าให้ BACKEND_BASE_URL ถูกอ่านจาก Environment Variable ของ Render
     DATABASE_URL: str 
-    # --- เพิ่มบรรทัดนี้ ---
     INVITATION_CODE: str = "DEFAULT_SECRET_CHANGE_ME"
     
-    BACKEND_BASE_URL: str = "http://127.0.0.1:8000"
+    BACKEND_BASE_URL: str = "https://manhwalist-final.onrender.com"
     
     TELEGRAM_BOT_TOKEN_NOTIFY: Optional[str] = None # <<< Bot A
     TELEGRAM_BOT_TOKEN_REPORT: Optional[str] = None # <<< Bot B
