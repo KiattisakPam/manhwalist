@@ -362,8 +362,11 @@ async def notify_tomorrow_updates(
         for comic in comics_list:
             image_file = comic.get('image_file')
             if image_file:
-                # สร้าง URL สาธารณะของภาพปก
-                image_url = f"{base_url}/covers/{image_file}" 
+                # 📌 [FIX] เข้ารหัสชื่อไฟล์ด้วย urllib.parse.quote()
+                encoded_file_name = urllib.parse.quote(image_file) 
+                
+                # 2. สร้าง URL สาธารณะของภาพปก
+                image_url = f"{base_url}/covers/{encoded_file_name}" 
                 photo_urls_list.append(image_url)
         
         # 📌 [สำคัญ] ถ้ามีภาพให้ส่งเป็น Media Group (อัลบั้ม)
@@ -400,7 +403,7 @@ async def notify_tomorrow_updates(
                 print(f"DEBUG_NOTIFY: Sent {len(photo_urls_list)} images as single photos (fallback).")
             
         return {"message": f"Sent update notification for {len(comics_list)} comic(s) as media group/single photos."}
-
+    
     # 6. ถ้า with_image=False ให้ส่งแค่ข้อความสรุป
     else:
         print(f"DEBUG_NOTIFY: Attempting to send text message (Bot B) to Chat ID: {report_chat_id}")

@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles # <<< เพิ่มการนำเข้า
+from fastapi.staticfiles import StaticFiles
 import datetime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
+import os # <<< เพิ่มการนำเข้า os
+
 from database import engine, metadata
 from models import users
 from auth import get_password_hash
@@ -20,6 +22,16 @@ from routers import (
     chat as chatRouter
 )
 
+# 📌 [FIX] ฟังก์ชันสร้างโฟลเดอร์
+def ensure_directories_exist():
+    # สร้างโฟลเดอร์ทั้งหมดที่จำเป็นและใช้ exist_ok=True
+    os.makedirs("covers", exist_ok=True)
+    os.makedirs("job_files", exist_ok=True)
+    os.makedirs("chat_files", exist_ok=True)
+    print("INFO: Ensured necessary directories (covers, job_files, chat_files) exist.")
+
+ensure_directories_exist() # <<< เรียกใช้ก่อน FastAPI instance
+
 app = FastAPI(title="Comic Secretary API")
 
 # --- CORS ---
@@ -32,7 +44,6 @@ app.add_middleware(
 )
 
 # --- Static Files Configuration ---
-# ✅ เพิ่มการตั้งค่าสำหรับ Covers, Job Files, และ Chat Files
 app.mount("/covers", StaticFiles(directory="covers"), name="covers") 
 app.mount("/job-files", StaticFiles(directory="job_files"), name="job_files") 
 app.mount("/chat-files", StaticFiles(directory="chat_files"), name="chat_files") 
@@ -76,5 +87,4 @@ async def startup():
 @app.get("/", tags=["Root"])
 async def read_root():
     return {"message": "Welcome to the Comic Secretary API"}
-
 
