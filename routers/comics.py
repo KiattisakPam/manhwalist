@@ -353,21 +353,22 @@ async def notify_tomorrow_updates(
         photo_urls_list = []
         
         
-        base_url = settings.BACKEND_BASE_url
+        base_url = settings.BACKEND_BASE_URL.replace("http://", "https://")
         
         for comic in comics_list:
             image_file = comic.get('image_file')
             if image_file:
-                # 📌 [FIX] ใช้ urllib.parse.quote() เสมอ (ถึงจะเป็นภาษาอังกฤษก็ตาม เพื่อความปลอดภัย)
+                # 📌 [FIX 2] เข้ารหัสชื่อไฟล์ด้วย urllib.parse.quote()
                 encoded_file_name = urllib.parse.quote(image_file) 
                 
                 # 2. สร้าง URL สาธารณะของภาพปก
                 image_url = f"{base_url}/covers/{encoded_file_name}" 
                 photo_urls_list.append(image_url)
                 
-                # 📌 [DEBUG LOG] เพิ่มการพิมพ์ URL ที่ถูกสร้าง
+                # 📌 [DEBUG LOG] เพิ่มการพิมพ์ URL ที่ถูกสร้าง (เพื่อให้เห็นใน Log ต่อไป)
                 print(f"DEBUG_NOTIFY: Image URL created: {image_url}")
-        
+                
+                
         # 📌 [สำคัญ] ถ้ามีภาพให้ส่งเป็น Media Group (อัลบั้ม)
         if photo_urls_list:
             # 1. ลองส่ง Media Group ก่อน
