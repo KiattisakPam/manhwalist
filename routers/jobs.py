@@ -47,7 +47,7 @@ async def create_job(
     episode_number: int = Form(...),
     task_type: str = Form(...),
     rate: float = Form(...),
-    telegram_link: Optional[str] = Form(None), # NOTE: ฟิลด์นี้ยังคงรับได้ แต่เราจะใช้ Chat ID จาก DB แทน
+    telegram_link: Optional[str] = Form(None), 
     work_file: UploadFile = File(...),
     supplemental_file: Optional[UploadFile] = File(None),
     supplemental_file_comment: Optional[str] = Form(None)
@@ -62,11 +62,9 @@ async def create_job(
     if not employee or employee.employer_id != current_user.id:
         raise HTTPException(status_code=403, detail="Employee not found or not owned by user")
         
-    # [FIX: สร้างโฟลเดอร์ก่อนใช้งาน]
-    # os.makedirs("job_files", exist_ok=True)
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
 
-# 📌 [FIX 1] อัปโหลดไฟล์งานหลักไป Firebase
+    # 📌 [FIX 1] อัปโหลดไฟล์งานหลักไป Firebase
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
     work_blob_name = f"job_files/{work_file_name}"
     
@@ -91,14 +89,18 @@ async def create_job(
             content_type=supplemental_file.content_type
         )
         
+    # 📌 [CRITICAL FIX]: ใช้ Blob Name ที่ถูกต้องในการบันทึก DB
     job_data = {
         "comic_id": comic_id, "employee_id": employee_id, "episode_number": episode_number,
         "task_type": task_type, "rate": rate, "assigned_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "employer_work_file": file_name, "telegram_link": telegram_link,
-        "supplemental_file": supplemental_file_name,
+        # 🛑 แก้ไข: ใช้ work_blob_name แทน file_name
+        "employer_work_file": work_blob_name, 
+        "telegram_link": telegram_link,
+        "supplemental_file": supplemental_blob_name,
         "supplemental_file_comment": supplemental_file_comment,
-        "last_telegram_activity": "NEW_JOB", # <<<<< แก้ไข: เซ็ตกิจกรรมเริ่มต้น >>>>>
+        "last_telegram_activity": "NEW_JOB", 
     }
+    
     res = await db.execute(sqlalchemy.insert(jobs).values(**job_data))
     await db.commit()
     
@@ -415,7 +417,6 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
 
     return {"message": "Job has been sent back for revision."}
 
-
 @router.post("/{job_id}/approve-archive", status_code=200)
 async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
     job_res = await db.execute(sqlalchemy.select(jobs).where(jobs.c.id == job_id))
@@ -433,12 +434,20 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     if owner_id != current_user.id:
          raise HTTPException(status_code=403, detail="Not authorized to modify this job")
      
-    # 1. รวบรวมชื่อ Blob ทั้งหมดที่ต้องลบ (ไฟล์งานหลัก, ไฟล์ที่พนักงานส่ง, ไฟล์เสริมเริ่มต้น)
+    # 1. รวบรวมชื่อ Blob ทั้งหมดที่ต้องลบ
     files_to_delete = [
         job.employer_work_file, 
         job.employee_finished_file, 
         job.supplemental_file
     ]
+    
+    if job.episode_number > comic.last_updated_ep:
+        # อัปเดต last_updated_ep
+        await db.execute(
+            sqlalchemy.update(comics)
+            .where(comics.c.id == job.comic_id)
+            .values(last_updated_ep=job.episode_number)
+        )
     
     # 2. ลบไฟล์งานหลักจาก Firebase Storage
     for blob_name in files_to_delete:
@@ -460,20 +469,6 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
         except Exception as e:
             print(f"WARNING: Failed to delete supplemental file {blob_name} from Firebase: {e}")
             pass
-                
-    # 3. ลบ Supplemental Files ทั้งหมดที่เพิ่มมาภายหลัง
-    # ค้นหารายการไฟล์เสริมทั้งหมด
-    supp_files_query = sqlalchemy.select(job_supplemental_files.c.file_name).where(job_supplemental_files.c.job_id == job_id)
-    supp_files_result = await db.execute(supp_files_query)
-    supplemental_files_to_delete_later = supp_files_result.scalars().all()
-    
-    for blob_name in supplemental_files_to_delete_later:
-        try:
-            # 📌 [FIX 2] ลบ Blob จาก Firebase Storage
-            await firebase_storage_client.delete_file_from_firebase(blob_name)
-        except Exception as e:
-            print(f"WARNING: Failed to delete supplemental file {blob_name} from Firebase: {e}")
-            pass
         
     # 4. ลบ Record จากตาราง job_supplemental_files
     delete_supp_query = sqlalchemy.delete(job_supplemental_files).where(job_supplemental_files.c.job_id == job_id)
@@ -482,7 +477,6 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     # 5. อัปเดต Job status และล้างชื่อไฟล์ใน Job table
     await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(
         status="ARCHIVED",
-        # 📌 [FIX 3] เคลียร์ชื่อ Blob ทั้งหมดใน DB (ป้องกันการอ้างอิงถึงไฟล์ที่ถูกลบไปแล้ว)
         employer_work_file=None,
         employee_finished_file=None,
         supplemental_file=None, 
