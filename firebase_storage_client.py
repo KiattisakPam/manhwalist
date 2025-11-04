@@ -11,9 +11,8 @@ from fastapi.responses import StreamingResponse
 # [*** สำคัญ ***] เปลี่ยน 'comic-secretary.appspot.com' เป็นชื่อ Bucket จริงของคุณ
 FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.appspot.com") 
 
-# 📌 [FIX 2] Initialize Firebase Admin SDK
+# 📌 [FIX] ปรับปรุง Logic การ Initialize
 try:
-    # 1. อ่าน Credential จาก Environment Variable หรือ File (สำหรับ Local Test)
     json_credential_str = os.environ.get("FIREBASE_CREDENTIALS_JSON")
     
     if json_credential_str:
@@ -21,13 +20,19 @@ try:
     else:
         cred = credentials.Certificate("firebase-service-account.json") 
         
-    # ถ้ายังไม่ถูก Initialize ให้ Initialize
-    if not firebase_admin._apps:
+    # ----------------------------------------------------
+    # 🛑 ตรวจสอบว่าแอปถูก Initialize หรือไม่ ก่อนเรียก initialize_app()
+    if not firebase_admin._apps: 
         firebase_admin.initialize_app(cred, {
             'storageBucket': FIREBASE_BUCKET_NAME
         })
         print("INFO: Firebase Admin SDK initialized successfully for Storage.")
+    else:
+        # หากถูก Initialize แล้ว (โดย Worker อื่น) ให้ข้ามไป
+        print("INFO: Firebase Admin SDK already initialized by another worker.") 
+    
     bucket = storage.bucket()
+    
     
 except Exception as e:
     print(f"ERROR: Failed to initialize Firebase Admin SDK for Storage: {e}")
