@@ -3,26 +3,33 @@
 import firebase_admin
 from firebase_admin import credentials, storage
 import os
-from typing import Optional
+import json # <<< เพิ่มการนำเข้า
+from typing import Optional, Iterator
+from fastapi.responses import StreamingResponse
 
-# 📌 [FIX 1] ตั้งค่า Storage Bucket
+# 📌 [FIX 1] ตั้งค่า Storage Bucket (ใช้ Project ID ของคุณ)
 # [*** สำคัญ ***] เปลี่ยน 'comic-secretary.appspot.com' เป็นชื่อ Bucket จริงของคุณ
-FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.appspot.com")
-
+FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.appspot.com") 
 
 # 📌 [FIX 2] Initialize Firebase Admin SDK
 try:
-    # Service Account File Name (ต้องมีไฟล์นี้อยู่ใน root ของ Backend)
-    cred = credentials.Certificate("firebase-service-account.json") 
+    # 1. อ่าน Credential จาก Environment Variable หรือ File (สำหรับ Local Test)
+    json_credential_str = os.environ.get("FIREBASE_CREDENTIALS_JSON")
     
-    firebase_admin.initialize_app(cred, {
-        'storageBucket': FIREBASE_BUCKET_NAME
-    })
-    print("INFO: Firebase Admin SDK initialized successfully for Storage.")
+    if json_credential_str:
+        cred = credentials.Certificate(json.loads(json_credential_str))
+    else:
+        cred = credentials.Certificate("firebase-service-account.json") 
+        
+    # ถ้ายังไม่ถูก Initialize ให้ Initialize
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': FIREBASE_BUCKET_NAME
+        })
+        print("INFO: Firebase Admin SDK initialized successfully for Storage.")
     bucket = storage.bucket()
     
 except Exception as e:
-    # นี่คือการจัดการ Error เมื่อ Initialization ล้มเหลว (เช่น ไฟล์ .json หาย)
     print(f"ERROR: Failed to initialize Firebase Admin SDK for Storage: {e}")
     bucket = None
 
@@ -71,4 +78,5 @@ async def download_file_from_firebase(blob_name: str) -> Optional[bytes]:
     if blob.exists():
         return blob.download_as_bytes()
     return None
+
 

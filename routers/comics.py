@@ -28,7 +28,6 @@ router = APIRouter(
     dependencies=[Depends(auth.get_current_user)]
 )
 
-
 # 📌 [FIX] 1. อัปโหลดภาพปก
 @router.post("/upload-image/", tags=["Files"])
 async def upload_image(file: UploadFile = File(...), current_user: User = Depends(auth.get_current_employer_user)):
@@ -162,6 +161,7 @@ async def update_comic(comic_id: int, comic_update: ComicUpdate, db: AsyncSessio
     await db.commit()
     return {"message": "Comic updated successfully"}
 
+# 📌 [FIX] 2. ลบภาพปก
 @router.delete("/{comic_id}/", status_code=200)
 async def delete_comic(comic_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
     # 1. ตรวจสอบความเป็นเจ้าของ
@@ -193,6 +193,7 @@ async def delete_comic(comic_id: int, db: AsyncSession = Depends(get_db), curren
     await db.commit()
 
     return {"message": "Comic and all associated data deleted successfully"}
+
 
 
 @router.post("/auto-update", status_code=200)
@@ -283,6 +284,7 @@ async def get_comics_to_update_tomorrow(db: AsyncSession, employer_id: int) -> L
     result = await db.execute(query)
     return result.mappings().all()
 
+# 📌 [FIX] 3. Notify Tomorrow Updates
 @router.post("/notify-tomorrow-updates", status_code=200)
 async def notify_tomorrow_updates(
     db: AsyncSession = Depends(get_db), 
@@ -358,12 +360,16 @@ async def notify_tomorrow_updates(
     
     # 5. Logic การส่ง
     if with_image:
-        print("DEBUG_NOTIFY: Sending images (using File System Read and Document Upload).")
+        print("DEBUG_NOTIFY: Sending images (using Firebase Download and Document Upload).")
         
         await asyncio.sleep(1) 
         
-        # 📌 [FIX] ใช้ settings.BACKEND_BASE_URL (ไม่ใช้แล้วเพราะเปลี่ยนเป็น File Read)
-        # base_url = settings.BACKEND_BASE_URL.replace("http://", "https://") 
+        # 5.1. ส่งข้อความสรุปแบบ Text ไปก่อน
+        await telegram_config.send_telegram_notification(
+            report_chat_id, 
+            final_message,
+            bot_type='REPORT' 
+        )
         
         # 5.2. ส่งภาพปกทีละภาพ (Binary Document Upload)
         for i, comic in enumerate(comics_list): 
@@ -371,11 +377,9 @@ async def notify_tomorrow_updates(
             
             if image_file_name_with_path:
                 
-                # 📌 [FIX] ดึงชื่อไฟล์และนามสกุลที่ถูกต้อง
+                # 📌 [FIX] สร้างชื่อไฟล์สำหรับ Telegram
                 original_file_name = os.path.basename(image_file_name_with_path)
                 original_extension = os.path.splitext(original_file_name)[1]
-                
-                # ใช้ชื่อเรื่อง + นามสกุลไฟล์เดิม
                 telegram_file_name = f"{comic['title']}{original_extension}" 
                 
                 # 📌 [FIX] สร้าง Caption
@@ -385,9 +389,9 @@ async def notify_tomorrow_updates(
                     f"ต้นฉบับ: Ep {comic['original_latest_ep']}\n"
                     f"กำหนด: {comic['update_type']} ({comic['update_value']})"
                 )
-                
+
                 try:
-                    # 1. อ่าน Binary Data จาก Firebase Storage (File System Read)
+                    # 1. อ่าน Binary Data จาก Firebase Storage
                     image_bytes = await firebase_storage_client.download_file_from_firebase(image_file_name_with_path)
                     
                     if image_bytes is None:

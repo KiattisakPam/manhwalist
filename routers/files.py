@@ -2,11 +2,17 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 import os
 import pathlib
+from typing import Iterator
 import firebase_storage_client
 
 router = APIRouter(
     tags=["Files"]
 )
+
+# 📌 [FIX] ฟังก์ชัน helper สำหรับสร้าง StreamingResponse
+def iter_file(file_bytes: bytes) -> Iterator[bytes]:
+    """Iterator เพื่อ stream bytes data"""
+    yield file_bytes
 
 @router.get("/covers/{file_name}")
 async def get_cover_image(file_name: str):
@@ -33,14 +39,13 @@ async def get_job_file(file_name: str):
             
         # 📌 [FIX] ใช้ StreamingResponse ส่งไฟล์ Binary กลับไป
         return StreamingResponse(
-            content=iter([file_bytes]),
-            media_type="application/octet-stream", # หรือตามประเภทไฟล์
+            content=iter_file(file_bytes),
+            media_type="application/octet-stream", 
             headers={"Content-Disposition": f"attachment; filename={file_name}"}
         )
     except Exception as e:
         print(f"ERROR: Failed to stream file {blob_name} from Firebase: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error during file retrieval.")
-    
     
 @router.get("/chat-files/{file_name}")
 async def get_chat_file(file_name: str):
@@ -53,7 +58,7 @@ async def get_chat_file(file_name: str):
             raise HTTPException(status_code=404, detail="File not found in storage.")
             
         return StreamingResponse(
-            content=iter([file_bytes]),
+            content=iter_file(file_bytes),
             media_type="application/octet-stream", 
             headers={"Content-Disposition": f"attachment; filename={file_name}"}
         )

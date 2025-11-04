@@ -66,7 +66,7 @@ async def create_job(
     # os.makedirs("job_files", exist_ok=True)
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
 
-# 📌 [FIX 1] อัปโหลดไฟล์งานหลัก
+# 📌 [FIX 1] อัปโหลดไฟล์งานหลักไป Firebase
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
     work_blob_name = f"job_files/{work_file_name}"
     
@@ -80,7 +80,7 @@ async def create_job(
     supplemental_file_name = None
     supplemental_blob_name = None
     if supplemental_file:
-        # 📌 [FIX 2] อัปโหลดไฟล์เสริมเริ่มต้น
+        # 📌 [FIX 2] อัปโหลดไฟล์เสริมเริ่มต้นไป Firebase
         supplemental_file_name = f"supp_{timestamp}_ep{episode_number}_{supplemental_file.filename}"
         supplemental_blob_name = f"job_files/{supplemental_file_name}"
         
@@ -415,6 +415,7 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
 
     return {"message": "Job has been sent back for revision."}
 
+
 @router.post("/{job_id}/approve-archive", status_code=200)
 async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
     job_res = await db.execute(sqlalchemy.select(jobs).where(jobs.c.id == job_id))
@@ -439,23 +440,26 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
         job.supplemental_file
     ]
     
-    if job.episode_number > comic.last_updated_ep:
-        # อัปเดต last_updated_ep
-        await db.execute(
-            sqlalchemy.update(comics)
-            .where(comics.c.id == job.comic_id)
-            .values(last_updated_ep=job.episode_number)
-        )
-    
     # 2. ลบไฟล์งานหลักจาก Firebase Storage
     for blob_name in files_to_delete:
         if blob_name:
             try:
-                # 📌 [FIX 1] ลบ Blob จาก Firebase Storage
                 await firebase_storage_client.delete_file_from_firebase(blob_name)
             except Exception as e:
                 print(f"WARNING: Failed to delete job file {blob_name} from Firebase: {e}")
                 pass
+                
+    # 3. ลบ Supplemental Files ทั้งหมดที่เพิ่มมาภายหลัง
+    supp_files_query = sqlalchemy.select(job_supplemental_files.c.file_name).where(job_supplemental_files.c.job_id == job_id)
+    supp_files_result = await db.execute(supp_files_query)
+    supplemental_files_to_delete_later = supp_files_result.scalars().all()
+    
+    for blob_name in supplemental_files_to_delete_later:
+        try:
+            await firebase_storage_client.delete_file_from_firebase(blob_name)
+        except Exception as e:
+            print(f"WARNING: Failed to delete supplemental file {blob_name} from Firebase: {e}")
+            pass
                 
     # 3. ลบ Supplemental Files ทั้งหมดที่เพิ่มมาภายหลัง
     # ค้นหารายการไฟล์เสริมทั้งหมด
