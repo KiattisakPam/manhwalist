@@ -64,9 +64,10 @@ async def create_job(
         
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
 
-    # 📌 [FIX 1] อัปโหลดไฟล์งานหลักไป Firebase
+    # 📌 [CRITICAL FIX] 1. อัปโหลดไฟล์งานหลัก
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
-    work_blob_name = f"job_files/{work_file_name}"
+    work_blob_name = f"job_files/{work_file_name}" # <<< Path ต้องเป็น job_files/filename
+    
     
     work_file_bytes = await work_file.read()
     await firebase_storage_client.upload_file_to_firebase(
