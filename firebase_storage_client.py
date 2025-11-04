@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 # 📌 [FIX 1] ตั้งค่า Storage Bucket (ใช้ Project ID ของคุณ)
 # [*** สำคัญ ***] เปลี่ยน 'comic-secretary.appspot.com' เป็นชื่อ Bucket จริงของคุณ
-FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "browser")
+FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.firebasestorage.app")
 
 try:
     json_credential_str = os.environ.get("FIREBASE_CREDENTIALS_JSON")
