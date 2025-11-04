@@ -7,7 +7,8 @@ from typing import Optional
 
 # 📌 [FIX 1] ตั้งค่า Storage Bucket
 # [*** สำคัญ ***] เปลี่ยน 'comic-secretary.appspot.com' เป็นชื่อ Bucket จริงของคุณ
-FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.appspot.com") 
+FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.appspot.com")
+
 
 # 📌 [FIX 2] Initialize Firebase Admin SDK
 try:
