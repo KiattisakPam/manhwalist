@@ -64,9 +64,11 @@ async def create_job(
         
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
 
-    # 📌 [CRITICAL FIX] 1. อัปโหลดไฟล์งานหลักไป Firebase
+    work_file_bytes = await work_file.read()
+    
+    # 1. อัปโหลดไฟล์งานหลักไป Firebase
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
-    work_blob_name = f"job_files/{work_file_name}" # <<< Path ต้องเป็น job_files/filename
+    work_blob_name = f"job_files/{work_file_name}"
     
     final_work_blob_name_in_db = await firebase_storage_client.upload_file_to_firebase(
         work_file_bytes, 
@@ -74,12 +76,16 @@ async def create_job(
         content_type=work_file.content_type
     )
 
-    supplemental_blob_name = None
+    final_supp_blob_name_in_db = None
     if supplemental_file:
-        # 📌 [FIX 2] อัปโหลดไฟล์เสริมเริ่มต้นไป Firebase
+        # 📌 [CRITICAL FIX 2] อ่าน supplemental_file เป็น bytes
+        supp_file_bytes = await supplemental_file.read() 
+
+        # 2. อัปโหลดไฟล์เสริมเริ่มต้นไป Firebase
         supplemental_file_name = f"supp_{timestamp}_ep{episode_number}_{supplemental_file.filename}"
         supplemental_blob_name = f"job_files/{supplemental_file_name}"
         
+        # 📌 [FIX] ใช้ supp_file_bytes ที่อ่านแล้ว
         final_supp_blob_name_in_db = await firebase_storage_client.upload_file_to_firebase(
             supp_file_bytes, 
             supplemental_blob_name,
