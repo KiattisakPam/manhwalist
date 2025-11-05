@@ -91,6 +91,7 @@ async def get_job_file(blob_name: str = Path(...)):
 async def get_chat_file(blob_name: str = Path(...)):
     """ดึงไฟล์แชทจาก Firebase Storage"""
     
+    
     if not blob_name.startswith("chat_files/"):
         blob_name = f"chat_files/{blob_name}"
 
