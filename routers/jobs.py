@@ -68,9 +68,7 @@ async def create_job(
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
     work_blob_name = f"job_files/{work_file_name}" # <<< Path ต้องเป็น job_files/filename
     
-    
-    work_file_bytes = await work_file.read()
-    await firebase_storage_client.upload_file_to_firebase(
+    final_work_blob_name_in_db = await firebase_storage_client.upload_file_to_firebase(
         work_file_bytes, 
         work_blob_name,
         content_type=work_file.content_type
@@ -82,8 +80,7 @@ async def create_job(
         supplemental_file_name = f"supp_{timestamp}_ep{episode_number}_{supplemental_file.filename}"
         supplemental_blob_name = f"job_files/{supplemental_file_name}"
         
-        supp_file_bytes = await supplemental_file.read()
-        await firebase_storage_client.upload_file_to_firebase(
+        final_supp_blob_name_in_db = await firebase_storage_client.upload_file_to_firebase(
             supp_file_bytes, 
             supplemental_blob_name,
             content_type=supplemental_file.content_type
@@ -93,10 +90,9 @@ async def create_job(
     job_data = {
         "comic_id": comic_id, "employee_id": employee_id, "episode_number": episode_number,
         "task_type": task_type, "rate": rate, "assigned_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        # 🛑 แก้ไข: ใช้ work_blob_name แทน file_name
-        "employer_work_file": work_blob_name,
+        "employer_work_file": final_work_blob_name_in_db,
         "telegram_link": telegram_link,
-        "supplemental_file": supplemental_blob_name,
+        "supplemental_file": final_supp_blob_name_in_db if supplemental_file else None,
         "supplemental_file_comment": supplemental_file_comment,
         "last_telegram_activity": "NEW_JOB", 
     }

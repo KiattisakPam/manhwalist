@@ -38,21 +38,13 @@ async def get_cover_image(file_name: str = Path(...)):
 # 📌 [CRITICAL FIX & DEBUG] Endpoint สำหรับดึงไฟล์งาน/ไฟล์เสริมจาก Firebase Storage
 @router.get("/job-files/{blob_name:path}")
 async def get_job_file(blob_name: str = Path(...)):
-    """ดึงไฟล์งานหลัก/ไฟล์เสริมจาก Firebase Storage"""
     
-    # 1. URL Decode ชื่อ Blob ที่ได้รับมา (จาก Frontend)
-    decoded_blob_name = urllib.parse.unquote(blob_name) 
-    
-    # 2. ตรวจสอบ Path
-    if not decoded_blob_name.startswith("job_files/"):
-        temp_blob_name = f"job_files/{decoded_blob_name}"
+    if not blob_name.startswith("job_files/"):
+        final_blob_name_for_client = f"job_files/{blob_name}"
     else:
-        temp_blob_name = decoded_blob_name
-        
-    final_blob_name_for_client = urllib.parse.quote(temp_blob_name)
+        final_blob_name_for_client = blob_name
 
-    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch BLOB (Client Encoded): {final_blob_name_for_client}")
-    
+    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch RAW blob path: {final_blob_name_for_client}")
     
     try:
         # 3. ดาวน์โหลดไฟล์ Binary จาก Firebase (ใช้ชื่อที่มีภาษาไทย)
