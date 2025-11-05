@@ -218,6 +218,7 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
     if job.get('employee_finished_file'):
         old_blob_name = job['employee_finished_file']
         try:
+            # 🛑 [CRITICAL FIX] ใช้ Firebase Client แทน os.remove
             await firebase_storage_client.delete_file_from_firebase(old_blob_name)
         except Exception as e:
             print(f"ERROR: Failed to remove old finished file {old_blob_name}. Continuing: {e}")
@@ -340,14 +341,14 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
     if job.status != "COMPLETED":
         raise HTTPException(status_code=400, detail="Only completed jobs can be sent for revision")
 
-    # [FIX: ลบไฟล์งานที่พนักงานส่งมาล่าสุดอย่างปลอดภัย]
+    # 🛑 [FIX] ลบไฟล์งานที่พนักงานส่งมาล่าสุดจาก Firebase Storage อย่างปลอดภัย
     if job.employee_finished_file:
-        file_path_to_delete = os.path.join("job_files", job.employee_finished_file)
+        blob_name_to_delete = job.employee_finished_file
         try:
-            if os.path.exists(file_path_to_delete):
-                os.remove(file_path_to_delete)
+            await firebase_storage_client.delete_file_from_firebase(blob_name_to_delete)
         except Exception as e:
-            print(f"WARNING: Failed to delete revision file {file_path_to_delete}: {e}")
+            # ไม่ต้อง raise error เพราะต้องการให้ Logic ดำเนินการต่อ
+            print(f"WARNING: Failed to delete revision file {blob_name_to_delete}: {e}")
             pass
         
     # 📌 อัปเดตสถานะ ASSIGNED และ last_telegram_activity
@@ -457,6 +458,7 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     for blob_name in files_to_delete:
         if blob_name:
             try:
+                # 🛑 [FIX] ใช้ Firebase Client
                 await firebase_storage_client.delete_file_from_firebase(blob_name)
             except Exception as e:
                 print(f"WARNING: Failed to delete job file {blob_name} from Firebase: {e}")
@@ -468,11 +470,11 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     supplemental_files_to_delete_later = supp_files_result.scalars().all()
     
     for blob_name in supplemental_files_to_delete_later:
-        # 📌 [FIX] Blob Name ของไฟล์เสริมต้องมี job_files/ นำหน้าเสมอ (จากการบันทึกใน add-file)
         if not blob_name.startswith('job_files/'):
-             blob_name = f'job_files/{blob_name}' # ป้องกัน
+             blob_name = f'job_files/{blob_name}'
              
         try:
+            # 🛑 [FIX] ใช้ Firebase Client
             await firebase_storage_client.delete_file_from_firebase(blob_name)
         except Exception as e:
             print(f"WARNING: Failed to delete supplemental file {blob_name} from Firebase: {e}")

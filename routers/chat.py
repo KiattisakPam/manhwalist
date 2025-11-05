@@ -13,7 +13,7 @@ import auth
 import firebase_config
 import asyncio
 import telegram_config
-
+import firebase_storage_client
 
 router = APIRouter(
     prefix="/chat",
@@ -479,16 +479,25 @@ async def get_message_history(
 async def upload_chat_file(
     room_id: int, 
     file: UploadFile = File(...),
-    current_user: User = Depends(auth.get_current_user) # <<< เพิ่ม
+    current_user: User = Depends(auth.get_current_user)
 ):
-    os.makedirs("chat_files", exist_ok=True)
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
-    file_name = f"chat_{room_id}_{timestamp}_{file.filename}"
-    file_path = os.path.join("chat_files", file_name)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
     
-    return {"file_name": file_name}
+    # 1. สร้าง Blob Name
+    new_file_name_raw = f"chat_{room_id}_{timestamp}_{file.filename}"
+    blob_name = f"chat_files/{new_file_name_raw}"
+    
+    # 2. อ่านไฟล์เป็น bytes และอัปโหลดไป Firebase
+    file_bytes = await file.read()
+    await firebase_storage_client.upload_file_to_firebase(
+        file_bytes, 
+        blob_name,
+        content_type=file.content_type
+    )
+
+    # 3. คืนค่า Blob Name เต็ม (Backend/chat-files/ ถูกใช้เป็น Base URL ใน Frontend)
+    return {"file_name": blob_name}
+
 
 @router.post("/rooms/{room_id}/read/{last_message_id}")
 async def mark_room_as_read(
@@ -556,7 +565,7 @@ async def delete_chat_room(
     # 3. ดำเนินการลบ
     print(f"INFO: Attempting to delete chat room data for room_id: {room_id}")
 
-    # <<< FIX 1: ค้นหาและลบไฟล์จริงก่อนลบข้อความ >>>
+    # 🛑 [CRITICAL FIX] ค้นหาและลบไฟล์จริงใน Firebase ก่อนลบข้อความ
     file_query = sqlalchemy.select(chat_messages.c.content).where(
         chat_messages.c.room_id == room_id,
         chat_messages.c.message_type.in_(['image', 'file']) 
@@ -564,19 +573,18 @@ async def delete_chat_room(
     file_results = (await db.execute(file_query)).scalars().all()
 
     deleted_files_count = 0
-    for file_name in file_results:
-        # file_name ใน content จะเป็นชื่อไฟล์โดยตรง
-        file_path = os.path.join("chat_files", file_name)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                deleted_files_count += 1
-            except Exception as e:
-                print(f"ERROR: Failed to delete file {file_path}: {e}")
+    for blob_name in file_results:
+        # blob_name ที่ถูกเก็บคือ Blob Name เต็ม (chat_files/filename.jpg)
+        try:
+            await firebase_storage_client.delete_file_from_firebase(blob_name)
+            deleted_files_count += 1
+        except Exception as e:
+            # ไม่ต้อง raise error เพราะต้องการลบห้องแชทให้สำเร็จ
+            print(f"ERROR: Failed to delete file {blob_name} from Firebase: {e}")
 
     print(f"INFO: Processed {len(file_results)} message records; Deleted {deleted_files_count} physical files.")
     # ------------------------------------------------------------------
-
+    
     # ลบ chat_read_status
     await db.execute(
         sqlalchemy.delete(chat_read_status).where(chat_read_status.c.room_id == room_id)
