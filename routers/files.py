@@ -5,6 +5,7 @@ import os
 import pathlib
 from typing import Iterator
 import firebase_storage_client
+import urllib.parse
 
 router = APIRouter(
     tags=["Files"]
@@ -37,24 +38,23 @@ async def get_cover_image(file_name: str = Path(...)):
 # 📌 [CRITICAL FIX & DEBUG] Endpoint สำหรับดึงไฟล์งาน/ไฟล์เสริมจาก Firebase Storage
 @router.get("/job-files/{blob_name:path}")
 async def get_job_file(blob_name: str = Path(...)):
-    """
-    ดึงไฟล์งานหลัก/ไฟล์เสริมจาก Firebase Storage
-    :param blob_name: Blob Name ที่ส่งมา เช่น job_files/work_timestamp_name.zip
-    """
+    """ดึงไฟล์งานหลัก/ไฟล์เสริมจาก Firebase Storage"""
     
-    # 1. ตรวจสอบและแก้ไข Blob Name (กรณี Frontend ส่งมาโดยไม่มี Path Folder)
-    # NOTE: เราไม่ใช้ os.path.join เนื่องจาก Blob Name ควรใช้ forward slash (/) เสมอ
-    if not blob_name.startswith("job_files/"):
-        final_blob_name = f"job_files/{blob_name}"
+    # 📌 [CRITICAL FIX] 1. URL Decode ชื่อ Blob ที่ได้รับมา
+    decoded_blob_name = urllib.parse.unquote(blob_name) 
+    
+    # 2. ตรวจสอบและแก้ไข Path
+    if not decoded_blob_name.startswith("job_files/"):
+        final_blob_name = f"job_files/{decoded_blob_name}"
     else:
-        final_blob_name = blob_name
+        final_blob_name = decoded_blob_name
 
     # 📌 [DEBUG LOG] แสดงชื่อ Blob ที่ใช้ค้นหาจริง
-    print(f"DEBUG_DOWNLOAD_START: Received Path: {blob_name}")
-    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch blob: {final_blob_name}")
-
+    print(f"DEBUG_DOWNLOAD_START: Received Encoded Path: {blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch Decoded blob: {final_blob_name}")
+    
     try:
-        # 2. ดาวน์โหลดไฟล์ Binary จาก Firebase
+        # 3. ดาวน์โหลดไฟล์ Binary จาก Firebase (ใช้ชื่อที่มีภาษาไทย)
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
         if file_bytes is None:
@@ -72,10 +72,10 @@ async def get_job_file(blob_name: str = Path(...)):
             headers={"Content-Disposition": f"attachment; filename={original_file_name}"}
         )
         
-    except NotFound: # 📌 [FIX/DEBUG] ตรวจสอบ Error 'NotFound' โดยเฉพาะ
-        print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage (Firebase Error).")
-        raise HTTPException(status_code=404, detail="File not found in storage.")
-        
+    except NotFound: 
+        print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage.")
+        raise HTTPException(status_code=404, detail="File not found in storage. (Check Blob Name/Existence)")
+    
     except Forbidden: # 📌 [CRITICAL FIX] ใช้ Forbidden ที่ Import มา
         print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}. (Check Firebase Service Account)")
         raise HTTPException(status_code=403, detail="Permission denied to access file.")
