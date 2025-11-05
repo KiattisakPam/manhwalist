@@ -40,22 +40,23 @@ async def get_cover_image(file_name: str = Path(...)):
 async def get_job_file(blob_name: str = Path(...)):
     """ดึงไฟล์งานหลัก/ไฟล์เสริมจาก Firebase Storage"""
     
-    # 📌 [CRITICAL FIX] 1. URL Decode ชื่อ Blob ที่ได้รับมา
+    # 1. URL Decode ชื่อ Blob ที่ได้รับมา (จาก Frontend)
     decoded_blob_name = urllib.parse.unquote(blob_name) 
     
-    # 2. ตรวจสอบและแก้ไข Path
+    # 2. ตรวจสอบ Path
     if not decoded_blob_name.startswith("job_files/"):
-        final_blob_name = f"job_files/{decoded_blob_name}"
+        temp_blob_name = f"job_files/{decoded_blob_name}"
     else:
-        final_blob_name = decoded_blob_name
+        temp_blob_name = decoded_blob_name
+        
+    final_blob_name_for_client = urllib.parse.quote(temp_blob_name)
 
-    # 📌 [DEBUG LOG] แสดงชื่อ Blob ที่ใช้ค้นหาจริง
-    print(f"DEBUG_DOWNLOAD_START: Received Encoded Path: {blob_name}")
-    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch Decoded blob: {final_blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch BLOB (Client Encoded): {final_blob_name_for_client}")
+    
     
     try:
         # 3. ดาวน์โหลดไฟล์ Binary จาก Firebase (ใช้ชื่อที่มีภาษาไทย)
-        file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
+        file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name_for_client)
         
         if file_bytes is None:
             # 📌 [DEBUG LOG] แสดงข้อความเมื่อไม่พบไฟล์

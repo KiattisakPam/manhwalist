@@ -73,6 +73,9 @@ async def delete_file_from_firebase(blob_name: str):
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
+    # 📌 [CRITICAL FIX] บังคับ Encode ชื่อ Blob ก่อนเรียก Blob
+    encoded_blob_name = urllib.parse.quote(blob_name)
+    
     # 📌 [FIX] ใช้ try/except เพื่อดักจับ NotFound
     try:
         blob = bucket.blob(blob_name)
@@ -93,8 +96,9 @@ async def download_file_from_firebase(blob_name: str) -> bytes:
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
-    blob = bucket.blob(blob_name)
-    
+    # 📌 [CRITICAL FIX] บังคับ Encode ชื่อ Blob ก่อนเรียก Blob
+    encoded_blob_name = urllib.parse.quote(blob_name)
+    blob = bucket.blob(encoded_blob_name)
     # 📌 [CRITICAL FIX B] ใช้ try/except เพื่อให้ NotFound ถูกโยนออกไป 
     # และถูกดักจับใน files.py (ซึ่งจะแปลงเป็น HTTP 404)
     try:
