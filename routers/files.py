@@ -31,16 +31,20 @@ async def get_cover_image(file_name: str = Path(...)):
     
     return FileResponse(file_path)
 
-# 📌 [CRITICAL FIX] Endpoint สำหรับดึงไฟล์งาน/ไฟล์เสริมจาก Firebase Storage
 @router.get("/job-files/{blob_name:path}")
-async def get_job_file(blob_name: str = Path(...)):
+async def get_job_file(
+    blob_name: str = Path(...),
+    # 🛑 [CRITICAL FIX] Add dependency to ensure user is authenticated 
+    # (even though it's streaming, the token must be processed)
+    current_user: User = Depends(auth.get_current_user) 
+):
     
     if not blob_name.startswith("job_files/"):
         final_blob_name = f"job_files/{blob_name}"
     else:
         final_blob_name = blob_name
 
-    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch RAW blob path: {final_blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch RAW blob path: {final_blob_name} by user {current_user.email}")
     
     try:
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
