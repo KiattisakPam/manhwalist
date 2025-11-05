@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Path
 from fastapi.responses import FileResponse, StreamingResponse
+from google.cloud.exceptions import NotFound, PermissionDenied
 import os
 import pathlib
 from typing import Iterator
@@ -70,10 +71,18 @@ async def get_job_file(blob_name: str = Path(...)):
             media_type="application/octet-stream", 
             headers={"Content-Disposition": f"attachment; filename={original_file_name}"}
         )
+        
+    except NotFound: # 📌 [FIX/DEBUG] ตรวจสอบ Error 'NotFound' โดยเฉพาะ
+        print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage (Firebase Error).")
+        raise HTTPException(status_code=404, detail="File not found in storage.")
+        
+    except PermissionDenied: # 📌 [FIX/DEBUG] ตรวจสอบ Error 'PermissionDenied' โดยเฉพาะ
+        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}.")
+        raise HTTPException(status_code=403, detail="Permission denied to access file.")
+        
     except Exception as e:
         # 4. Error Handling
         print(f"ERROR: Failed to stream file {final_blob_name} from Firebase: {e}")
-        # 📌 หากเป็น Error อื่นที่ไม่ใช่ 404
         raise HTTPException(status_code=500, detail="Internal Server Error during file retrieval.")
     
     
