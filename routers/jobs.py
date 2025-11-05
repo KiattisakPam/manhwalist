@@ -64,7 +64,7 @@ async def create_job(
         
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
 
-    # 📌 [CRITICAL FIX] 1. อัปโหลดไฟล์งานหลัก
+    # 📌 [CRITICAL FIX] 1. อัปโหลดไฟล์งานหลักไป Firebase
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
     work_blob_name = f"job_files/{work_file_name}" # <<< Path ต้องเป็น job_files/filename
     
@@ -76,7 +76,6 @@ async def create_job(
         content_type=work_file.content_type
     )
 
-    supplemental_file_name = None
     supplemental_blob_name = None
     if supplemental_file:
         # 📌 [FIX 2] อัปโหลดไฟล์เสริมเริ่มต้นไป Firebase
@@ -95,7 +94,7 @@ async def create_job(
         "comic_id": comic_id, "employee_id": employee_id, "episode_number": episode_number,
         "task_type": task_type, "rate": rate, "assigned_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         # 🛑 แก้ไข: ใช้ work_blob_name แทน file_name
-        "employer_work_file": work_blob_name, 
+        "employer_work_file": work_blob_name,
         "telegram_link": telegram_link,
         "supplemental_file": supplemental_blob_name,
         "supplemental_file_comment": supplemental_file_comment,
@@ -201,29 +200,32 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
     employee_name = employee_info.name
     current_activity = 'JOB_COMPLETE' 
 
-    # 2. บันทึกไฟล์ที่เสร็จแล้ว
-    os.makedirs("job_files", exist_ok=True)
-    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S') # ใช้ UTC Time
+    # 2. บันทึกไฟล์ที่เสร็จแล้วไป Firebase
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
     new_file_name = f"fin_{timestamp}_ep{job['episode_number']}_{finished_file.filename}"
-    new_file_path = os.path.join("job_files", new_file_name)
-    with open(new_file_path, "wb") as buffer:
-        shutil.copyfileobj(finished_file.file, buffer)
-
-    # 3. ลบไฟล์เก่าอย่างปลอดภัย
+    new_blob_name = f"job_files/{new_file_name}"
+    
+    file_bytes = await finished_file.read()
+    await firebase_storage_client.upload_file_to_firebase(
+        file_bytes, 
+        new_blob_name,
+        content_type=finished_file.content_type
+    )
+    
+    # 3. ลบไฟล์เก่าจาก Firebase Storage อย่างปลอดภัย
     if job.get('employee_finished_file'):
-        file_path_to_delete = os.path.join("job_files", job['employee_finished_file'])
+        old_blob_name = job['employee_finished_file']
         try:
-            if os.path.exists(file_path_to_delete):
-                os.remove(file_path_to_delete)
+            await firebase_storage_client.delete_file_from_firebase(old_blob_name)
         except Exception as e:
-            print(f"ERROR: Failed to remove old finished file {file_path_to_delete}. Continuing: {e}")
-            pass 
+            print(f"ERROR: Failed to remove old finished file {old_blob_name}. Continuing: {e}")
+            pass
 
     # 4. อัปเดตสถานะงาน
     await db.execute(sqlalchemy.update(jobs).where(jobs.c.id == job_id).values(
         status="COMPLETED", 
-        employee_finished_file=new_file_name,
-        completed_date=datetime.datetime.now(datetime.timezone.utc).isoformat(), # ใช้ UTC Time
+        employee_finished_file=new_blob_name, # 🛑 บันทึก Blob Name
+        completed_date=datetime.datetime.now(datetime.timezone.utc).isoformat(), 
         last_telegram_activity=current_activity
     ))
     await db.commit()
@@ -449,7 +451,6 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
             .where(comics.c.id == job.comic_id)
             .values(last_updated_ep=job.episode_number)
         )
-    
     # 2. ลบไฟล์งานหลักจาก Firebase Storage
     for blob_name in files_to_delete:
         if blob_name:
@@ -465,6 +466,10 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     supplemental_files_to_delete_later = supp_files_result.scalars().all()
     
     for blob_name in supplemental_files_to_delete_later:
+        # 📌 [FIX] Blob Name ของไฟล์เสริมต้องมี job_files/ นำหน้าเสมอ (จากการบันทึกใน add-file)
+        if not blob_name.startswith('job_files/'):
+             blob_name = f'job_files/{blob_name}' # ป้องกัน
+             
         try:
             await firebase_storage_client.delete_file_from_firebase(blob_name)
         except Exception as e:
@@ -594,15 +599,21 @@ async def add_supplemental_file_to_job(
     current_activity = 'FILE_ADDED' # <<<<< เพิ่ม: กำหนดกิจกรรมปัจจุบัน >>>>>
 
     os.makedirs("job_files", exist_ok=True)
+    
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
     new_file_name = f"supp_{timestamp}_job{job_id}_{file.filename}"
-    file_path = os.path.join("job_files", new_file_name)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    new_blob_name = f"job_files/{new_file_name}"
+    
+    file_bytes = await file.read()
+    await firebase_storage_client.upload_file_to_firebase(
+        file_bytes, 
+        new_blob_name,
+        content_type=file.content_type
+    )
 
     insert_query = sqlalchemy.insert(job_supplemental_files).values(
         job_id=job_id,
-        file_name=new_file_name,
+        file_name=new_blob_name, # 🛑 บันทึก Blob Name เต็ม
         comment=comment,
         uploaded_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
     )

@@ -46,8 +46,8 @@ async def upload_image(file: UploadFile = File(...), current_user: User = Depend
         content_type=file.content_type
     )
     
-    return {"file_name": blob_name} # <<< [FIX] คืนค่าชื่อ Blob (covers/filename)
-
+    # 📌 [FIX] คืนค่าชื่อ Blob (covers/filename)
+    return {"file_name": blob_name}
 
 
 @router.get("/", response_model=List[ComicWithCompletion])
@@ -131,7 +131,7 @@ async def get_comic_episode_statuses(comic_id: int, db: AsyncSession = Depends(g
             job_id=j.job_id,
             employee_name=j.employee_name,
             task_type=j.task_type,
-            finished_file_url=f"/job-files/{j.employee_finished_file}" if j.employee_finished_file else None,
+            finished_file_url=j.employee_finished_file,
         ) for j in jobs_result.mappings().all()
     ]
     return all_jobs_for_comic
@@ -186,7 +186,7 @@ async def delete_comic(comic_id: int, db: AsyncSession = Depends(get_db), curren
             await firebase_storage_client.delete_file_from_firebase(blob_name) 
         except Exception as e:
             print(f"WARNING: Failed to delete cover image from Firebase: {e}")
-
+            
     # 3. ลบ Comic Record 
     delete_query = sqlalchemy.delete(comics).where(comics.c.id == comic_id)
     await db.execute(delete_query)

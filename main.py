@@ -5,8 +5,8 @@ import datetime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy
-import os # <<< เพิ่มการนำเข้า os
-
+import os
+import telegram_config
 from database import engine, metadata
 from models import users
 from auth import get_password_hash
@@ -22,15 +22,15 @@ from routers import (
     chat as chatRouter
 )
 
-# 📌 [FIX] ฟังก์ชันสร้างโฟลเดอร์
+# 📌 [FIX] ฟังก์ชันสร้างโฟลเดอร์ (ยังคงจำเป็นสำหรับ Static Files: covers)
 def ensure_directories_exist():
-    # สร้างโฟลเดอร์ทั้งหมดที่จำเป็นและใช้ exist_ok=True
     os.makedirs("covers", exist_ok=True)
-    os.makedirs("job_files", exist_ok=True)
+    # NOTE: job_files และ chat_files ไม่จำเป็นต้องสร้างถ้าใช้ Firebase 100% แต่ควรมีเผื่อ Static File
+    os.makedirs("job_files", exist_ok=True) 
     os.makedirs("chat_files", exist_ok=True)
-    print("INFO: Ensured necessary directories (covers, job_files, chat_files) exist.")
+    print("INFO: Ensured necessary directories exist.")
 
-ensure_directories_exist() # <<< เรียกใช้ก่อน FastAPI instance
+ensure_directories_exist() 
 
 app = FastAPI(title="Comic Secretary API")
 
@@ -44,19 +44,21 @@ app.add_middleware(
 )
 
 # --- Static Files Configuration ---
+# 📌 [FIX] Static Files (covers) ยังคงต้องใช้
 app.mount("/covers", StaticFiles(directory="covers"), name="covers") 
-app.mount("/job-files", StaticFiles(directory="job_files"), name="job_files") 
-app.mount("/chat-files", StaticFiles(directory="chat_files"), name="chat_files") 
+# 📌 [FIX] Endpoint Streaming (job-files/chat-files) ถูกตั้งค่าใน files.py/routers
+app.mount("/job-files", filesRouter.router, name="job_files_streaming") 
+app.mount("/chat-files", filesRouter.router, name="chat_files_streaming")
 # ----------------------------------
 
 
 # --- Include Routers ---
+# 📌 [FIX] ไม่ต้องรวม filesRouter อีกรอบ เพราะถูก Mount แล้ว
 app.include_router(usersRouter.router)
 app.include_router(comicsRouter.router)
 app.include_router(jobsRouter.router)
 app.include_router(employeesRouter.router)
 app.include_router(programsRouter.router)
-app.include_router(filesRouter.router)
 app.include_router(notificationsRouter.router)
 app.include_router(settingsRouter.router)
 app.include_router(chatRouter.router)
