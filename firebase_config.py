@@ -9,16 +9,25 @@ FIREBASE_CREDENTIALS_JSON = os.environ.get('FIREBASE_CREDENTIALS_JSON')
 
 if FIREBASE_CREDENTIALS_JSON:
     try:
-        # โหลด credentials จาก JSON string ใน Environment Variable
-        cred_dict = json.loads(FIREBASE_CREDENTIALS_JSON)
-        cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred)
-        print("Firebase Admin SDK initialized successfully.")
+        # 📌 [CRITICAL FIX] ตรวจสอบว่า Default App ยังไม่ถูก Initialize
+        if not firebase_admin._apps: 
+            # โหลด credentials จาก JSON string ใน Environment Variable
+            cred_dict = json.loads(FIREBASE_CREDENTIALS_JSON)
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+            print("INFO: Firebase Admin SDK initialized successfully for Messaging.")
+        else:
+            print("INFO: Firebase Admin SDK was already initialized.")
+
+        # 📌 [FIX] โหลด Storage Bucket (ถ้าใช้)
+        # ตรวจสอบว่าคุณมีโค้ดสำหรับ Storage Initialization แยกต่างหากหรือไม่
+        # ถ้าคุณมีโค้ดในไฟล์อื่น (เช่น firebase_storage_client.py) ที่เรียก initialize_app ซ้ำ คุณต้องแก้ตรงนั้นด้วย
+        
     except Exception as e:
         print(f"Error initializing Firebase Admin SDK: {e}")
 else:
     print("Warning: FIREBASE_CREDENTIALS_JSON environment variable not found. Firebase notifications will be disabled.")
-
+    
 
 def send_notification(tokens: list[str], title: str, body: str):
     if not firebase_admin._apps:

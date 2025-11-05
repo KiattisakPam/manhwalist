@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Path
 from fastapi.responses import FileResponse, StreamingResponse
-from google.cloud.exceptions import NotFound, PermissionDenied
+from google.cloud.exceptions import NotFound, Forbidden
 import os
 import pathlib
 from typing import Iterator
@@ -76,8 +76,8 @@ async def get_job_file(blob_name: str = Path(...)):
         print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage (Firebase Error).")
         raise HTTPException(status_code=404, detail="File not found in storage.")
         
-    except PermissionDenied: # 📌 [FIX/DEBUG] ตรวจสอบ Error 'PermissionDenied' โดยเฉพาะ
-        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}.")
+    except Forbidden: # 📌 [CRITICAL FIX] ใช้ Forbidden ที่ Import มา
+        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}. (Check Firebase Service Account)")
         raise HTTPException(status_code=403, detail="Permission denied to access file.")
         
     except Exception as e:
