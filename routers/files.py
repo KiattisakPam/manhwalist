@@ -33,35 +33,49 @@ async def get_cover_image(file_name: str = Path(...)):
     
     return FileResponse(file_path)
 
-# 📌 [CRITICAL FIX] Endpoint สำหรับดึงไฟล์งาน/ไฟล์เสริม
+# 📌 [CRITICAL FIX & DEBUG] Endpoint สำหรับดึงไฟล์งาน/ไฟล์เสริมจาก Firebase Storage
 @router.get("/job-files/{blob_name:path}")
 async def get_job_file(blob_name: str = Path(...)):
-    """ดึงไฟล์งานหลัก/ไฟล์เสริมจาก Firebase Storage"""
+    """
+    ดึงไฟล์งานหลัก/ไฟล์เสริมจาก Firebase Storage
+    :param blob_name: Blob Name ที่ส่งมา เช่น job_files/work_timestamp_name.zip
+    """
     
-    # 📌 [FIX] ตรวจสอบว่า Blob Name มี Path Folder 'job_files/' นำหน้าหรือไม่
+    # 1. ตรวจสอบและแก้ไข Blob Name (กรณี Frontend ส่งมาโดยไม่มี Path Folder)
+    # NOTE: เราไม่ใช้ os.path.join เนื่องจาก Blob Name ควรใช้ forward slash (/) เสมอ
     if not blob_name.startswith("job_files/"):
-        blob_name = f"job_files/{blob_name}"
+        final_blob_name = f"job_files/{blob_name}"
+    else:
+        final_blob_name = blob_name
 
-    print(f"DEBUG_DOWNLOAD: Attempting to download job blob: {blob_name}")
+    # 📌 [DEBUG LOG] แสดงชื่อ Blob ที่ใช้ค้นหาจริง
+    print(f"DEBUG_DOWNLOAD_START: Received Path: {blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch blob: {final_blob_name}")
 
     try:
-        # 📌 [FIX] ดาวน์โหลดไฟล์ Binary จาก Firebase
-        file_bytes = await firebase_storage_client.download_file_from_firebase(blob_name)
+        # 2. ดาวน์โหลดไฟล์ Binary จาก Firebase
+        file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
         if file_bytes is None:
+            # 📌 [DEBUG LOG] แสดงข้อความเมื่อไม่พบไฟล์
+            print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage.")
             raise HTTPException(status_code=404, detail="File not found in storage.")
             
-        # 📌 [FIX] ใช้ StreamingResponse ส่งไฟล์ Binary กลับไป
-        original_file_name = os.path.basename(blob_name) # ดึงชื่อไฟล์สุดท้าย
+        # 3. เตรียม Streaming Response
+        original_file_name = os.path.basename(final_blob_name) 
         
+        # NOTE: การส่ง Content-Disposition จะบังคับให้ Browser/Client ดาวน์โหลดไฟล์
         return StreamingResponse(
             content=iter_file(file_bytes),
             media_type="application/octet-stream", 
             headers={"Content-Disposition": f"attachment; filename={original_file_name}"}
         )
     except Exception as e:
-        print(f"ERROR: Failed to stream file {blob_name} from Firebase: {e}")
+        # 4. Error Handling
+        print(f"ERROR: Failed to stream file {final_blob_name} from Firebase: {e}")
+        # 📌 หากเป็น Error อื่นที่ไม่ใช่ 404
         raise HTTPException(status_code=500, detail="Internal Server Error during file retrieval.")
+    
     
 # 📌 [CRITICAL FIX] Endpoint สำหรับดึงไฟล์แชท
 @router.get("/chat-files/{blob_name:path}")
