@@ -8,6 +8,7 @@ import firebase_storage_client
 import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
+from schemas import User
 
 router = APIRouter(
     tags=["Files"]
@@ -34,13 +35,12 @@ async def get_cover_image(file_name: str = Path(...)):
 @router.get("/job-files/{blob_name:path}")
 async def get_job_file(
     blob_name: str = Path(...),
-    # 🛑 [CRITICAL FIX] Add dependency to ensure user is authenticated 
-    # (even though it's streaming, the token must be processed)
     current_user: User = Depends(auth.get_current_user) 
 ):
-    
-    if not blob_name.startswith("job_files/"):
-        final_blob_name = f"job_files/{blob_name}"
+    final_blob_name = blob_name 
+
+    if not final_blob_name.startswith("job_files/"):
+        final_blob_name = f"job_files/{blob_name}" # ใช้ blob_name เดิม (ที่ยังไม่ได้ encode)
     else:
         final_blob_name = blob_name
 
@@ -77,7 +77,7 @@ async def get_job_file(
     
 # 📌 [CRITICAL FIX] Endpoint สำหรับดึงไฟล์แชท
 @router.get("/chat-files/{blob_name:path}")
-async def get_chat_file(blob_name: str = Path(...)):
+async def get_chat_file(blob_name: str = Path(...),current_user: User = Depends(auth.get_current_user)):
     """ดึงไฟล์แชทจาก Firebase Storage"""
     
     if not blob_name.startswith("chat_files/"):
