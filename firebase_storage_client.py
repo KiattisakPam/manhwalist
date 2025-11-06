@@ -7,7 +7,7 @@ import os
 import json 
 from typing import Optional, Iterator
 from fastapi.responses import StreamingResponse
-import urllib.parse # <<< import นี้ไม่จำเป็นแล้ว แต่เก็บไว้ก็ได้
+# 🛑 ไม่ต้อง import urllib.parse
 from google.cloud.storage.blob import Blob 
 
 # ตั้งค่า Storage Bucket 
@@ -19,6 +19,7 @@ try:
     if json_credential_str:
         cred = credentials.Certificate(json.loads(json_credential_str))
     else:
+        # Fallback (ถ้ายังใช้ไฟล์ .json)
         cred = credentials.Certificate("firebase-service-account.json") 
         
     if not firebase_admin._apps: 
@@ -37,11 +38,11 @@ except Exception as e:
 
 
 async def upload_file_to_firebase(file_bytes: bytes, destination_blob_name: str, content_type: Optional[str] = 'application/octet-stream') -> str:
-    """อัปโหลดไฟล์ (bytes) ไปยัง Firebase Storage และคืนค่า URL สาธารณะ"""
+    """อัปโหลดไฟล์ (bytes) ไปยัง Firebase Storage (โดยไม่ encode ชื่อไฟล์เอง)"""
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
-    # 🛑 [FIX] ไม่ต้อง Encode Blob Name; library จะจัดการเอง
+    # 🛑 [FIX] ใช้ destination_blob_name ตรงๆ (เช่น "job_files/My File.zip")
     blob = bucket.blob(destination_blob_name) 
     
     print(f"FIREBASE_CLIENT_DEBUG: Uploading Blob: {destination_blob_name}")
@@ -51,17 +52,17 @@ async def upload_file_to_firebase(file_bytes: bytes, destination_blob_name: str,
         content_type=content_type
     )
     
-    return destination_blob_name # คืนค่า Blob Name (ที่ยังไม่ encode)
+    # 🛑 คืนค่าชื่อเดิมที่ได้รับมา
+    return destination_blob_name 
 
 async def delete_file_from_firebase(blob_name: str):
-    """ลบไฟล์ออกจาก Firebase Storage"""
+    """ลบไฟล์ออกจาก Firebase Storage (โดยไม่ encode ชื่อไฟล์เอง)"""
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
-    # 🛑 [FIX] ไม่ต้อง Encode Blob Name
-    
     try:
-        blob = bucket.blob(blob_name) # ใช้ blob_name ตรงๆ
+        # 🛑 [FIX] ใช้ blob_name ตรงๆ
+        blob = bucket.blob(blob_name)
         blob.delete()
         print(f"INFO: Successfully deleted blob: {blob_name}")
         return True
@@ -73,19 +74,18 @@ async def delete_file_from_firebase(blob_name: str):
         raise
 
 async def download_file_from_firebase(blob_name: str) -> bytes:
-    """ดาวน์โหลดไฟล์ (bytes) จาก Firebase Storage"""
+    """ดาวน์โหลดไฟล์ (bytes) จาก Firebase Storage (โดยไม่ encode ชื่อไฟล์เอง)"""
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
-    # 🛑 [FIX] ไม่ต้อง Encode Blob Name
-    blob = bucket.blob(blob_name) # ใช้ blob_name ตรงๆ
+    # 🛑 [FIX] ใช้ blob_name ตรงๆ
+    blob = bucket.blob(blob_name)
     
     try:
         file_bytes = blob.download_as_bytes()
         return file_bytes
     except NotFound as e:
         print(f"FIREBASE_CLIENT_DEBUG: Download failed - Blob '{blob_name}' Not Found.")
-        # NOTE: ใช้ blob_name เดิมในการ Raise Error
         raise NotFound(f"Blob {blob_name} not found.") from e
     except Forbidden as e:
         print(f"FIREBASE_CLIENT_ERROR: Permission Denied for Blob: {blob_name}. {e}")
@@ -93,5 +93,4 @@ async def download_file_from_firebase(blob_name: str) -> bytes:
     except Exception as e:
         print(f"FIREBASE_CLIENT_ERROR: Unknown error during download: {e}")
         raise Exception(f"Firebase Download Error: {e}") from e
-    
     

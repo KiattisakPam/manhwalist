@@ -184,7 +184,17 @@ async def create_job(
     except Exception as e:
         print(f"Failed to send new job notification: {e}")
     
-    return {"id": new_job_id, **job_data}
+    # 🛑 [FIX] แก้ไขตรงนี้:
+    # สร้าง response data และแปลงค่า None ให้เป็น "" เพื่อป้องกัน Flutter error
+    response_data = job_data.copy()
+    response_data["id"] = new_job_id
+    response_data["telegram_link"] = response_data.get("telegram_link") or ""
+    response_data["supplemental_file_comment"] = response_data.get("supplemental_file_comment") or ""
+    # ถ้า supplemental_file เป็น None ก็ให้เป็น None (Flutter น่าจะรับได้)
+    response_data["supplemental_file"] = response_data.get("supplemental_file") 
+
+    return response_data
+
 
 @router.put("/{job_id}/complete")
 async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db), finished_file: UploadFile = File(...), current_user: User = Depends(auth.get_current_user)):
