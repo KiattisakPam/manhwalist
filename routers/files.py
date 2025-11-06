@@ -9,6 +9,7 @@ import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from schemas import User
+import auth  # <--- [FIX] เพิ่มบรรทัดนี้
 
 router = APIRouter(
     tags=["Files"]
@@ -35,7 +36,7 @@ async def get_cover_image(file_name: str = Path(...)):
 @router.get("/job-files/{blob_name:path}")
 async def get_job_file(
     blob_name: str = Path(...),
-    current_user: User = Depends(auth.get_current_user) 
+    current_user: User = Depends(auth.get_current_user) # <--- จุดที่เคย Error
 ):
     final_blob_name = blob_name 
 
@@ -77,7 +78,10 @@ async def get_job_file(
     
 # 📌 [CRITICAL FIX] Endpoint สำหรับดึงไฟล์แชท
 @router.get("/chat-files/{blob_name:path}")
-async def get_chat_file(blob_name: str = Path(...),current_user: User = Depends(auth.get_current_user)):
+async def get_chat_file(
+    blob_name: str = Path(...),
+    current_user: User = Depends(auth.get_current_user) # <--- จุดที่เคย Error
+):
     """ดึงไฟล์แชทจาก Firebase Storage"""
     
     if not blob_name.startswith("chat_files/"):
