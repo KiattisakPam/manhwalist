@@ -36,34 +36,38 @@ async def get_cover_image(file_name: str = Path(...)):
 @router.get("/job-files/{blob_name:path}")
 async def get_job_file(
     blob_name: str = Path(...),
-    current_user: User = Depends(auth.get_current_user) # <--- จุดที่เคย Error
+    current_user: User = Depends(auth.get_current_user) 
 ):
-    final_blob_name = blob_name 
+    
+    # 🛑 [FIX] 🛑
+    # ดึงแค่ "ชื่อไฟล์" สุดท้ายออกมา
+    # ไม่ว่า Client จะส่งมาซ้ำซ้อน (job_files/job_files/...) หรือไม่
+    actual_filename = os.path.basename(blob_name)
+    
+    # สร้าง Path ที่ถูกต้องขึ้นมาใหม่เสมอ
+    final_blob_name = f"job_files/{actual_filename}"
 
-    if not final_blob_name.startswith("job_files/"):
-        final_blob_name = f"job_files/{blob_name}" # ใช้ blob_name เดิม (ที่ยังไม่ได้ encode)
-    else:
-        final_blob_name = blob_name
-
-    print(f"DEBUG_DOWNLOAD_START: Attempting to fetch RAW blob path: {final_blob_name} by user {current_user.email}")
+    print(f"DEBUG_DOWNLOAD_START: Path received: {blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: Extracted filename: {actual_filename}")
+    print(f"DEBUG_DOWNLOAD_START: Final corrected blob path: {final_blob_name}")
     
     try:
+        # ใช้ final_blob_name ที่แก้ไขแล้วในการดาวน์โหลด
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
         if file_bytes is None:
-            print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage.")
+            # ... (โค้ดส่วน error) ...
             raise HTTPException(status_code=404, detail="File not found in storage.")
             
         original_file_name = os.path.basename(final_blob_name) 
         
-        # 🛑 [CRITICAL FIX] ต้องใส่ Quotes รอบ filename ใน Content-Disposition
         return StreamingResponse(
             content=iter_file(file_bytes),
             media_type="application/octet-stream", 
             headers={"Content-Disposition": f"attachment; filename=\"{original_file_name}\""}
         )
         
-    except NotFound: 
+    except NotFound:
         print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage.")
         raise HTTPException(status_code=404, detail="File not found in storage. (Check Blob Name/Existence)")
     
