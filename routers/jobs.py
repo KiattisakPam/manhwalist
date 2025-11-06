@@ -505,21 +505,41 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     await db.commit()
     return {"message": "Job approved and files have been archived."}
 
-
 @router.get("/{job_id}/supplemental-files/count", response_model=dict)
 async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    # ... (โค้ดเดิม) ...
+    
     job_res = await db.execute(
         sqlalchemy.select(
             jobs.c.comic_id, 
             jobs.c.employee_id,
             jobs.c.supplemental_file,
-            jobs.c.supplemental_file_comment # <<< ควรดึงมาด้วยเพื่อความสมบูรณ์
+            jobs.c.supplemental_file_comment
         ).where(jobs.c.id == job_id)
     )
     job = job_res.mappings().first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    
+    # 🛑 [FIX 3] เพิ่มโค้ดตรวจสอบสิทธิ์ตรงนี้ครับ 🛑
+    is_employer_owner = False
+    is_assigned_employee = False
+    
+    if current_user.role == 'employer':
+        comic_res = await db.execute(sqlalchemy.select(comics.c.employer_id).where(comics.c.id == job.comic_id))
+        owner_id = comic_res.scalar_one_or_none()
+        if owner_id == current_user.id:
+            is_employer_owner = True
+            
+    if current_user.role == 'employee':
+        emp_res = await db.execute(sqlalchemy.select(employees.c.id).where(employees.c.user_id == current_user.id))
+        employee_profile = emp_res.mappings().first()
+        if employee_profile and employee_profile.id == job.employee_id:
+            is_assigned_employee = True
+
+    if not is_employer_owner and not is_assigned_employee:
+         raise HTTPException(status_code=403, detail="Not authorized to view files for this job")
+    # 🛑 สิ้นสุดโค้ดที่เพิ่ม 🛑
+         
     
     # 2. นับจำนวนไฟล์เสริมที่เพิ่มภายหลัง (จากตาราง job_supplemental_files)
     count_later_query = sqlalchemy.select(sqlalchemy.func.count()).select_from(job_supplemental_files).where(job_supplemental_files.c.job_id == job_id)
@@ -533,8 +553,6 @@ async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depen
         "has_initial_file": has_initial_file,
         "total_files": count_later + (1 if has_initial_file else 0)
     }
-    
-    
 
 @router.get("/{job_id}/supplemental-files/", response_model=List[JobSupplementalFile])
 async def get_job_supplemental_files(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):

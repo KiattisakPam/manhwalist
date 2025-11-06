@@ -56,7 +56,7 @@ async def get_job_file(
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
         if file_bytes is None:
-            # ... (โค้ดส่วน error) ...
+            print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage.")
             raise HTTPException(status_code=404, detail="File not found in storage.")
             
         original_file_name = os.path.basename(final_blob_name) 
@@ -67,12 +67,12 @@ async def get_job_file(
             headers={"Content-Disposition": f"attachment; filename=\"{original_file_name}\""}
         )
         
-    except NotFound:
+    except NotFound: 
         print(f"DEBUG_DOWNLOAD_FAIL: Blob {final_blob_name} NOT FOUND in storage.")
         raise HTTPException(status_code=404, detail="File not found in storage. (Check Blob Name/Existence)")
     
     except Forbidden: 
-        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}. (Check Firebase Service Account)")
+        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}.")
         raise HTTPException(status_code=403, detail="Permission denied to access file.")
         
     except Exception as e:
