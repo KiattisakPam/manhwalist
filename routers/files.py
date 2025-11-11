@@ -39,16 +39,25 @@ async def get_job_file(
     current_user: User = Depends(auth.get_current_user) 
 ):
     
-    # 1. 🛑 [FIX] Decode Path ที่ถูกส่งมา
+    # 📌 [DEBUG PRINT 1] แสดง Path ดิบที่ได้รับจาก URL
+    print("="*50)
+    print(f"DEBUG (RAW URL PATH): {blob_name}")
+    
+    # 1. Decode Path ที่ถูกส่งมา เพื่อจัดการชื่อไฟล์ภาษาไทยที่ Encode มาจาก Flutter
     final_blob_name = urllib.parse.unquote(blob_name) 
     
+    # 📌 [DEBUG PRINT 2] แสดงค่าหลัง Decode และก่อนเข้า Logic Cleansing
+    print(f"DEBUG (AFTER UNQUOTE): {final_blob_name}")
+    
     # 2. 🛑 [CRITICAL FIX] จัดการ Path ซ้ำซ้อน (job_files/job_files/...)
-    #    ถ้าเริ่มต้นด้วย 'job_files/job_files/' ให้ตัด 'job_files/' ตัวแรกออก
     if final_blob_name.startswith("job_files/job_files/"):
         final_blob_name = final_blob_name.replace("job_files/", "", 1)
-        
-        
-    print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH (CLEANED): {final_blob_name}")
+        print(f"DEBUG (CLEANSED): Path was fixed.")
+    else:
+        print(f"DEBUG (CLEANSED): Path was already clean or incorrect.")
+
+    print(f"DEBUG (FINAL BLOB PATH TO FIREBASE): {final_blob_name}")
+    print("="*50)
     
     try:
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
