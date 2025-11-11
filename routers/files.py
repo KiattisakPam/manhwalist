@@ -39,21 +39,12 @@ async def get_job_file(
     current_user: User = Depends(auth.get_current_user) 
 ):
     
-    # 🛑 [FIX 2] แก้ไขเรื่อง 404 (Path ซ้ำซ้อน) 🛑
-    # ดึงแค่ "ชื่อไฟล์" สุดท้ายออกมา
-    # ไม่ว่า Client จะส่งมาซ้ำซ้อน (job_files/job_files/...) หรือไม่
-    actual_filename = os.path.basename(blob_name)
+    final_blob_name = blob_name
     
-    # สร้าง Path ที่ถูกต้องขึ้นมาใหม่เสมอ
-    final_blob_name = f"job_files/{actual_filename}"
-
-    # Log นี้จะพิสูจน์ว่าโค้ดใหม่ทำงานแล้ว
-    print(f"DEBUG_DOWNLOAD_START: Path received: {blob_name}")
-    print(f"DEBUG_DOWNLOAD_START: Extracted filename: {actual_filename}")
-    print(f"DEBUG_DOWNLOAD_START: Final corrected blob path: {final_blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH: {final_blob_name} by user {current_user.email}")
     
     try:
-        # ใช้ final_blob_name ที่แก้ไขแล้วในการดาวน์โหลด
+        # 1. โหลดไฟล์ (Firebase Client จะจัดการ URL Encoding เอง)
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
         if file_bytes is None:
@@ -62,7 +53,7 @@ async def get_job_file(
             
         original_file_name = os.path.basename(final_blob_name) 
         
-        # 🛑 [CRITICAL FIX] ต้องใส่ Quotes รอบ filename ใน Content-Disposition
+        # 2. คืนค่า Streaming Response
         return StreamingResponse(
             content=iter_file(file_bytes),
             media_type="application/octet-stream", 
@@ -74,7 +65,7 @@ async def get_job_file(
         raise HTTPException(status_code=404, detail="File not found in storage. (Check Blob Name/Existence)")
     
     except Forbidden: 
-        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}. (Check Firebase Service Account)")
+        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}.")
         raise HTTPException(status_code=403, detail="Permission denied to access file.")
         
     except Exception as e:

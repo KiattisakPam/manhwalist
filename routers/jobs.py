@@ -592,23 +592,37 @@ async def get_job_supplemental_files(job_id: int, db: AsyncSession = Depends(get
     return result.mappings().all()
 
 @router.get("/{job_id}/", response_model=JobWithComicInfo)
-async def get_job_by_id(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_employer_user)):
+async def get_job_by_id(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    
+    # 1. สร้าง Subquery เพื่อตรวจสอบสิทธิ์การเข้าถึง
+    is_employer_owner = sqlalchemy.select(comics.c.employer_id).where(comics.c.id == jobs.c.comic_id).scalar_subquery()
+    is_assigned_employee = sqlalchemy.select(employees.c.user_id).where(employees.c.id == jobs.c.employee_id).scalar_subquery()
+    
     query = sqlalchemy.select(
-        jobs.c.id, jobs.c.comic_id, jobs.c.employee_id, jobs.c.episode_number, jobs.c.task_type, jobs.c.rate, jobs.c.status, jobs.c.assigned_date, jobs.c.completed_date, jobs.c.employer_work_file, jobs.c.employee_finished_file, jobs.c.telegram_link, jobs.c.payroll_id, jobs.c.is_revision,
-        employees.c.name.label("employee_name"),
-        comics.c.title.label("comic_title"),
-        comics.c.image_file.label("comic_image_file")
+        # ... (คอลัมน์ทั้งหมด) ...
     ).select_from(
         jobs.join(employees, jobs.c.employee_id == employees.c.id)\
             .join(comics, jobs.c.comic_id == comics.c.id)
-    ).where(jobs.c.id == job_id, comics.c.employer_id == current_user.id) # <<< กรองตาม job_id และ employer_id
+    ).where(
+        sqlalchemy.and_(
+            jobs.c.id == job_id,
+            sqlalchemy.or_(
+                # เป็น Employer เจ้าของงาน
+                is_employer_owner == current_user.id,
+                # เป็น Employee ที่ได้รับมอบหมายงานนี้
+                is_assigned_employee == current_user.id
+            )
+        )
+    )
     
     result = (await db.execute(query)).mappings().first()
     
     if not result:
+        # 🛑 ถ้าไม่พบงาน หรือไม่มีสิทธิ์เข้าถึง
         raise HTTPException(status_code=404, detail="Job not found or not accessible")
-        
+    
     return result
+
 
 @router.post("/{job_id}/add-file", status_code=200)
 async def add_supplemental_file_to_job(
