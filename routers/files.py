@@ -39,12 +39,19 @@ async def get_job_file(
     current_user: User = Depends(auth.get_current_user) 
 ):
     
-    final_blob_name = blob_name
+    # 1. 🛑 [FIX] Decode Path ที่ถูกส่งมา เพื่อแก้ไขปัญหา Double Encoding/ซ้ำซ้อน
+    #    Path ที่มาถึงอาจถูก Encode มาแล้ว 1 รอบ, การ Unquote จะทำให้ได้ Blob Name ที่สะอาด
+    final_blob_name = urllib.parse.unquote(blob_name) 
     
-    print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH: {final_blob_name} by user {current_user.email}")
+    # 2. ลบ Prefix ที่ซ้ำซ้อน
+    #    เนื่องจาก Frontend ส่ง 'job-files/job_files/...' เราจะลบ 'job_files/' ที่ซ้ำออก
+    #    ถ้าเริ่มต้นด้วย 'job_files/job_files/' ให้ตัด 'job_files/' ออก 1 ครั้ง
+    if final_blob_name.startswith("job_files/job_files/"):
+        final_blob_name = final_blob_name.replace("job_files/", "", 1)
+        
+    print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH (UNQUOTED/CLEANED): {final_blob_name}")
     
     try:
-        # 1. โหลดไฟล์ (Firebase Client จะจัดการ URL Encoding เอง)
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
         if file_bytes is None:
@@ -79,12 +86,15 @@ async def get_chat_file(
     blob_name: str = Path(...),
     current_user: User = Depends(auth.get_current_user) 
 ):
-    # 🛑 [FIX 2] ใช้วิธีดึง basename มาใช้กับ Chat ด้วย
-    actual_filename = os.path.basename(blob_name)
-    final_blob_name = f"chat_files/{actual_filename}"
+    
+    final_blob_name = urllib.parse.unquote(blob_name) 
+    
+    # ลบ Prefix ที่ซ้ำซ้อน
+    if final_blob_name.startswith("chat_files/chat_files/"):
+        final_blob_name = final_blob_name.replace("chat_files/", "", 1)
 
-    print(f"DEBUG_DOWNLOAD: Attempting to download chat blob: {final_blob_name}")
-
+    print(f"DEBUG_DOWNLOAD: FINAL BLOB PATH (UNQUOTED/CLEANED): {final_blob_name}")
+    
     try:
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
         
