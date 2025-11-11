@@ -5,7 +5,6 @@ import os
 import pathlib
 from typing import Iterator
 import firebase_storage_client
-import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from schemas import User
@@ -39,12 +38,10 @@ async def get_job_file(
     current_user: User = Depends(auth.get_current_user) 
 ):
     
-    # 1. Decode Path ที่ถูกส่งมา
-    final_blob_name = urllib.parse.unquote(blob_name) 
+    # 1. 🛑 [CRITICAL FIX] ใช้ Blob Name ที่ FastAPI Decode มาแล้วตรงๆ
+    final_blob_name = blob_name 
     
-    # 2. 🛑 [CRITICAL FIX] จัดการ Path ซ้ำซ้อน (job_files/job_files/...)
-    #    เนื่องจาก Frontend ถูกแก้ไขให้ส่ง Blob Name เต็มมาแล้ว
-    #    Path ที่รับมาคือ 'job_files/work_...zip' (ถ้าถูกต้อง) หรือ 'job_files/job_files/work_...zip' (ถ้า Frontend มีปัญหา)
+    # 2. จัดการ Path ซ้ำซ้อน (Cleanse Path)
     if final_blob_name.startswith("job_files/job_files/"):
         final_blob_name = final_blob_name.replace("job_files/", "", 1)
         
