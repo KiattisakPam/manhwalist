@@ -39,14 +39,14 @@ async def get_job_file(
     current_user: User = Depends(auth.get_current_user) 
 ):
     
-    # 1. 🛑 [FIX] Decode Path ที่ถูกส่งมา เพื่อจัดการชื่อไฟล์ภาษาไทยที่ Encode มาจาก Flutter
+    # 1. 🛑 [FIX] Decode Path ที่ถูกส่งมา
     final_blob_name = urllib.parse.unquote(blob_name) 
     
-    # 2. 🛑 [CRITICAL FIX] จัดการ Path ซ้ำซ้อนที่เกิดจาก Frontend ส่ง 'job_files/job_files/...'
+    # 2. 🛑 [CRITICAL FIX] จัดการ Path ซ้ำซ้อน (job_files/job_files/...)
     #    ถ้าเริ่มต้นด้วย 'job_files/job_files/' ให้ตัด 'job_files/' ตัวแรกออก
     if final_blob_name.startswith("job_files/job_files/"):
-        # ใช้ replace(..., 1) เพื่อแทนที่ครั้งแรกครั้งเดียว
         final_blob_name = final_blob_name.replace("job_files/", "", 1)
+        
         
     print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH (CLEANED): {final_blob_name}")
     

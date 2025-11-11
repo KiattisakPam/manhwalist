@@ -616,12 +616,10 @@ async def get_job_by_id(job_id: int, db: AsyncSession = Depends(get_db), current
     
     
     # 2. ตรวจสอบสิทธิ์หลังดึงข้อมูล (เพื่อแก้ไขปัญหา SQLAlchemy)
-    
     is_employer_owner = result.comic_employer_id == current_user.id
     is_assigned_employee = False
     
     if current_user.role == 'employee':
-        # ตรวจสอบว่า user_id ของ employee ตรงกับ user_id ที่ login เข้ามาหรือไม่
         emp_res = await db.execute(sqlalchemy.select(employees.c.user_id).where(employees.c.id == result.employee_id))
         assigned_user_id = emp_res.scalar_one_or_none()
         if assigned_user_id == current_user.id:
@@ -631,7 +629,7 @@ async def get_job_by_id(job_id: int, db: AsyncSession = Depends(get_db), current
     if not is_employer_owner and not is_assigned_employee:
         raise HTTPException(status_code=403, detail="Not authorized to access this job.")
         
-    # 4. ลบคอลัมน์ที่ไม่จำเป็น (เช่น comic_employer_id) ก่อนส่งกลับ
+    # 4. ส่งข้อมูลกลับ
     result_dict = dict(result)
     del result_dict['comic_employer_id']
     
