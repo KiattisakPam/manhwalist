@@ -7,8 +7,8 @@ import os
 import json 
 from typing import Optional, Iterator
 from fastapi.responses import StreamingResponse
-# 🛑 ไม่ต้อง import urllib.parse
 from google.cloud.storage.blob import Blob 
+import urllib.parse
 
 # ตั้งค่า Storage Bucket 
 FIREBASE_BUCKET_NAME = os.environ.get("FIREBASE_BUCKET_NAME", "comic-secretary.firebasestorage.app")
@@ -42,8 +42,9 @@ async def upload_file_to_firebase(file_bytes: bytes, destination_blob_name: str,
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
+    encoded_blob_name = urllib.parse.quote(destination_blob_name)
     # 🛑 [CRITICAL FIX] ใช้ Blob Name (Unicode String) ตรงๆ ให้ Google Client Library จัดการ Encoding
-    blob = bucket.blob(destination_blob_name) 
+    blob = bucket.blob(encoded_blob_name)
     
     print(f"FIREBASE_CLIENT_DEBUG: Uploading Blob: {destination_blob_name}")
     
@@ -56,6 +57,10 @@ async def upload_file_to_firebase(file_bytes: bytes, destination_blob_name: str,
 
 async def delete_file_from_firebase(blob_name: str):
     """ลบไฟล์ออกจาก Firebase Storage"""
+    
+    encoded_blob_name = urllib.parse.quote(blob_name)
+    blob = bucket.blob(encoded_blob_name)
+    
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
@@ -77,8 +82,8 @@ async def download_file_from_firebase(blob_name: str) -> bytes:
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
-    # 🛑 [CRITICAL FIX] ใช้ Blob Name (Unicode String) ตรงๆ
-    blob = bucket.blob(blob_name)
+    encoded_blob_name = urllib.parse.quote(blob_name)
+    blob = bucket.blob(encoded_blob_name)
     
     try:
         file_bytes = blob.download_as_bytes()

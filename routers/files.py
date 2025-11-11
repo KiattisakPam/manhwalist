@@ -45,7 +45,7 @@ async def get_job_file(
     if final_blob_name.startswith("job_files/job_files/"):
         final_blob_name = final_blob_name.replace("job_files/", "", 1)
         
-    print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH (CLEANSED): {final_blob_name}")
+    print(f"DEBUG_DOWNLOAD_START: FINAL BLOB PATH (CLEANSED/RAW): {final_blob_name}")
     
     try:
         file_bytes = await firebase_storage_client.download_file_from_firebase(final_blob_name)
