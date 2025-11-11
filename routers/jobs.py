@@ -16,7 +16,7 @@ import firebase_config
 from routers.chat import notification_manager
 import telegram_config # <<< [สำคัญ] เพิ่ม Import Telegram Config
 import firebase_storage_client
-
+import urllib.parse
 
 router = APIRouter(
     prefix="/jobs",
@@ -66,9 +66,11 @@ async def create_job(
 
     work_file_bytes = await work_file.read()
     
-    # 1. อัปโหลดไฟล์งานหลักไป Firebase
     work_file_name = f"work_{timestamp}_ep{episode_number}_{work_file.filename}"
-    work_blob_name = f"job_files/{work_file_name}"
+    encoded_work_file_name = urllib.parse.quote(work_file_name)
+    
+    work_blob_name = f"job_files/{encoded_work_file_name}"
+    
     
     final_work_blob_name_in_db = await firebase_storage_client.upload_file_to_firebase(
         work_file_bytes, 
