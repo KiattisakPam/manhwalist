@@ -593,35 +593,49 @@ async def get_job_supplemental_files(job_id: int, db: AsyncSession = Depends(get
 
 @router.get("/{job_id}/", response_model=JobWithComicInfo)
 async def get_job_by_id(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    
-    # 1. สร้าง Subquery เพื่อตรวจสอบสิทธิ์การเข้าถึง
-    is_employer_owner = sqlalchemy.select(comics.c.employer_id).where(comics.c.id == jobs.c.comic_id).scalar_subquery()
-    is_assigned_employee = sqlalchemy.select(employees.c.user_id).where(employees.c.id == jobs.c.employee_id).scalar_subquery()
-    
+        
+        
+    # 1. สร้าง Query ดึง Job พร้อม Comic/Employee Info
     query = sqlalchemy.select(
-        # ... (คอลัมน์ทั้งหมด) ...
+        jobs.c.id, jobs.c.comic_id, jobs.c.employee_id, jobs.c.episode_number, jobs.c.task_type, jobs.c.rate, jobs.c.status, jobs.c.assigned_date, jobs.c.completed_date, jobs.c.employer_work_file, jobs.c.employee_finished_file, jobs.c.telegram_link, jobs.c.payroll_id, jobs.c.is_revision,
+        jobs.c.supplemental_file, jobs.c.supplemental_file_comment, # <<< เพิ่มไฟล์เสริม
+        employees.c.name.label("employee_name"),
+        comics.c.title.label("comic_title"),
+        comics.c.image_file.label("comic_image_file"),
+        comics.c.employer_id.label("comic_employer_id") # <<< ดึง employer_id มาตรวจสอบ
     ).select_from(
         jobs.join(employees, jobs.c.employee_id == employees.c.id)\
             .join(comics, jobs.c.comic_id == comics.c.id)
-    ).where(
-        sqlalchemy.and_(
-            jobs.c.id == job_id,
-            sqlalchemy.or_(
-                # เป็น Employer เจ้าของงาน
-                is_employer_owner == current_user.id,
-                # เป็น Employee ที่ได้รับมอบหมายงานนี้
-                is_assigned_employee == current_user.id
-            )
-        )
-    )
+    ).where(jobs.c.id == job_id)
     
     result = (await db.execute(query)).mappings().first()
     
-    if not result:
-        # 🛑 ถ้าไม่พบงาน หรือไม่มีสิทธิ์เข้าถึง
-        raise HTTPException(status_code=404, detail="Job not found or not accessible")
     
-    return result
+    if not result:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    
+    # 2. ตรวจสอบสิทธิ์หลังดึงข้อมูล (เพื่อแก้ไขปัญหา SQLAlchemy)
+    
+    is_employer_owner = result.comic_employer_id == current_user.id
+    is_assigned_employee = False
+    
+    if current_user.role == 'employee':
+        # ตรวจสอบว่า user_id ของ employee ตรงกับ user_id ที่ login เข้ามาหรือไม่
+        emp_res = await db.execute(sqlalchemy.select(employees.c.user_id).where(employees.c.id == result.employee_id))
+        assigned_user_id = emp_res.scalar_one_or_none()
+        if assigned_user_id == current_user.id:
+            is_assigned_employee = True
+            
+    # 3. หากไม่ใช่เจ้าของและไม่ใช่พนักงานที่ได้รับมอบหมาย ให้ตอบ 403
+    if not is_employer_owner and not is_assigned_employee:
+        raise HTTPException(status_code=403, detail="Not authorized to access this job.")
+        
+    # 4. ลบคอลัมน์ที่ไม่จำเป็น (เช่น comic_employer_id) ก่อนส่งกลับ
+    result_dict = dict(result)
+    del result_dict['comic_employer_id']
+    
+    return JobWithComicInfo.model_validate(result_dict)
 
 
 @router.post("/{job_id}/add-file", status_code=200)
