@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from google.cloud.exceptions import NotFound, Forbidden
-import os
+import os  # <--- [FIX] ตรวจสอบว่ามี import os
 import pathlib
 from typing import Iterator
 import firebase_storage_client
@@ -9,7 +9,7 @@ import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from schemas import User
-import auth  # <--- [FIX] เพิ่มบรรทัดนี้
+import auth # <--- [FIX] ตรวจสอบว่ามี import auth
 
 router = APIRouter(
     tags=["Files"]
@@ -39,7 +39,7 @@ async def get_job_file(
     current_user: User = Depends(auth.get_current_user) 
 ):
     
-    # 🛑 [FIX] 🛑
+    # 🛑 [FIX 2] แก้ไขเรื่อง 404 (Path ซ้ำซ้อน) 🛑
     # ดึงแค่ "ชื่อไฟล์" สุดท้ายออกมา
     # ไม่ว่า Client จะส่งมาซ้ำซ้อน (job_files/job_files/...) หรือไม่
     actual_filename = os.path.basename(blob_name)
@@ -47,6 +47,7 @@ async def get_job_file(
     # สร้าง Path ที่ถูกต้องขึ้นมาใหม่เสมอ
     final_blob_name = f"job_files/{actual_filename}"
 
+    # Log นี้จะพิสูจน์ว่าโค้ดใหม่ทำงานแล้ว
     print(f"DEBUG_DOWNLOAD_START: Path received: {blob_name}")
     print(f"DEBUG_DOWNLOAD_START: Extracted filename: {actual_filename}")
     print(f"DEBUG_DOWNLOAD_START: Final corrected blob path: {final_blob_name}")
@@ -61,6 +62,7 @@ async def get_job_file(
             
         original_file_name = os.path.basename(final_blob_name) 
         
+        # 🛑 [CRITICAL FIX] ต้องใส่ Quotes รอบ filename ใน Content-Disposition
         return StreamingResponse(
             content=iter_file(file_bytes),
             media_type="application/octet-stream", 
@@ -72,7 +74,7 @@ async def get_job_file(
         raise HTTPException(status_code=404, detail="File not found in storage. (Check Blob Name/Existence)")
     
     except Forbidden: 
-        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}.")
+        print(f"DEBUG_DOWNLOAD_FAIL: Permission Denied for {final_blob_name}. (Check Firebase Service Account)")
         raise HTTPException(status_code=403, detail="Permission denied to access file.")
         
     except Exception as e:
@@ -84,14 +86,11 @@ async def get_job_file(
 @router.get("/chat-files/{blob_name:path}")
 async def get_chat_file(
     blob_name: str = Path(...),
-    current_user: User = Depends(auth.get_current_user) # <--- จุดที่เคย Error
+    current_user: User = Depends(auth.get_current_user) 
 ):
-    """ดึงไฟล์แชทจาก Firebase Storage"""
-    
-    if not blob_name.startswith("chat_files/"):
-        final_blob_name = f"chat_files/{blob_name}" # 📌 [FIX] ใช้ final_blob_name
-    else:
-        final_blob_name = blob_name # 📌 [FIX] ใช้ final_blob_name
+    # 🛑 [FIX 2] ใช้วิธีดึง basename มาใช้กับ Chat ด้วย
+    actual_filename = os.path.basename(blob_name)
+    final_blob_name = f"chat_files/{actual_filename}"
 
     print(f"DEBUG_DOWNLOAD: Attempting to download chat blob: {final_blob_name}")
 
@@ -101,7 +100,7 @@ async def get_chat_file(
         if file_bytes is None:
             raise HTTPException(status_code=404, detail="File not found in storage.")
         
-        original_file_name = os.path.basename(final_blob_name) # 📌 [FIX] ใช้ final_blob_name
+        original_file_name = os.path.basename(final_blob_name)
             
         # 🛑 [CRITICAL FIX] ต้องใส่ Quotes รอบ filename ใน Content-Disposition
         return StreamingResponse(

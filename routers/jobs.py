@@ -112,6 +112,7 @@ async def create_job(
     current_activity = 'NEW_JOB'
     
     try:
+        # ... (โค้ดส่ง Notification - ปล่อยไว้เหมือนเดิม) ...
         # 1. ดึงข้อมูล User ID, ชื่อพนักงาน, และ Chat ID (จาก employees)
         emp_info_res = await db.execute(
             sqlalchemy.select(employees.c.user_id, employees.c.name, employees.c.telegram_chat_id)
@@ -145,7 +146,7 @@ async def create_job(
         if telegram_chat_id:
             # 📌 งานใหม่: ต้องแสดงหัวข้อเต็มเสมอ
             telegram_message = (
-                f"*{title}*  "
+                f"*{title}* "
                 # f"มอบหมายงานให้: *{employee_name}*\n" 
                 f"เรื่อง: *{comic_title}* ตอนที่ {episode_number}"
                 # f"ประเภท: *{task_type}*" # <<< ลบลิงก์ออกทั้งหมด
@@ -184,8 +185,8 @@ async def create_job(
     except Exception as e:
         print(f"Failed to send new job notification: {e}")
     
-    # 🛑 [FIX] 🛑
-    # สร้าง response data และแปลงค่า None ให้เป็น "" (สตริงว่าง)
+    # 🛑 [FIX 1] แก้ไขเรื่อง 'Null' Error 🛑
+    # สร้าง response data และแปลงค่า None ให้เป็น "" เพื่อป้องกัน Flutter error
     response_data = job_data.copy()
     response_data["id"] = new_job_id
     response_data["telegram_link"] = response_data.get("telegram_link") or "" 
@@ -194,7 +195,7 @@ async def create_job(
     response_data["supplemental_file"] = response_data.get("supplemental_file") 
 
     return response_data
-
+    # (ลบ return {"id": new_job_id, **job_data} ของเก่าทิ้ง)
 
 @router.put("/{job_id}/complete")
 async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db), finished_file: UploadFile = File(...), current_user: User = Depends(auth.get_current_user)):
@@ -288,7 +289,7 @@ async def employee_complete_job(job_id: int, db: AsyncSession = Depends(get_db),
                 "body": body,
                 "job_id": job_id,
             }
-            notification_manager.send_personal_notification(target_employer_id, bridge_message)
+            await notification_manager.send_personal_notification(target_employer_id, bridge_message) # << แก้ไข: ต้องใช้ await
 
             if tokens:
                 firebase_config.send_notification(
@@ -401,7 +402,7 @@ async def request_revision(job_id: int, db: AsyncSession = Depends(get_db), curr
                 else:
                     # กิจกรรมใหม่ -> แสดงหัวข้อเต็ม
                     telegram_message = (
-                        f"*{title}*  "
+                        f"*{title}* "
                         f"{body}"
                     )
                 
@@ -505,22 +506,24 @@ async def approve_and_archive_job(job_id: int, db: AsyncSession = Depends(get_db
     await db.commit()
     return {"message": "Job approved and files have been archived."}
 
+
 @router.get("/{job_id}/supplemental-files/count", response_model=dict)
 async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    
+    # ... (โค้ดเดิม) ...
     job_res = await db.execute(
         sqlalchemy.select(
             jobs.c.comic_id, 
             jobs.c.employee_id,
             jobs.c.supplemental_file,
-            jobs.c.supplemental_file_comment
+            jobs.c.supplemental_file_comment # <<< ควรดึงมาด้วยเพื่อความสมบูรณ์
         ).where(jobs.c.id == job_id)
     )
     job = job_res.mappings().first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    # 🛑 [FIX 3] เพิ่มโค้ดตรวจสอบสิทธิ์ตรงนี้ครับ 🛑
+        
+    # 🛑 [FIX 3] แก้ไขเรื่อง 403 (ไฟล์เสริม) 🛑
+    # เพิ่มโค้ดตรวจสอบสิทธิ์ตรงนี้ครับ
     is_employer_owner = False
     is_assigned_employee = False
     
@@ -539,7 +542,7 @@ async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depen
     if not is_employer_owner and not is_assigned_employee:
          raise HTTPException(status_code=403, detail="Not authorized to view files for this job")
     # 🛑 สิ้นสุดโค้ดที่เพิ่ม 🛑
-         
+    
     
     # 2. นับจำนวนไฟล์เสริมที่เพิ่มภายหลัง (จากตาราง job_supplemental_files)
     count_later_query = sqlalchemy.select(sqlalchemy.func.count()).select_from(job_supplemental_files).where(job_supplemental_files.c.job_id == job_id)
@@ -553,6 +556,8 @@ async def get_job_supplemental_files_count(job_id: int, db: AsyncSession = Depen
         "has_initial_file": has_initial_file,
         "total_files": count_later + (1 if has_initial_file else 0)
     }
+    
+    
 
 @router.get("/{job_id}/supplemental-files/", response_model=List[JobSupplementalFile])
 async def get_job_supplemental_files(job_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
@@ -630,7 +635,7 @@ async def add_supplemental_file_to_job(
 
     current_activity = 'FILE_ADDED' # <<<<< เพิ่ม: กำหนดกิจกรรมปัจจุบัน >>>>>
 
-    os.makedirs("job_files", exist_ok=True)
+    # os.makedirs("job_files", exist_ok=True) # <<< ไม่จำเป็นเมื่อใช้ Firebase
     
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
     new_file_name = f"supp_{timestamp}_job{job_id}_{file.filename}"
@@ -680,13 +685,13 @@ async def add_supplemental_file_to_job(
                     #     f"📁 {body}"
                     # )
                     telegram_message = (
-                        f"*{title}*  "
+                        f"*{title}* "
                         f"{body}"
                     )
                 else:
                     # กิจกรรมใหม่ -> แสดงหัวข้อเต็ม
                     telegram_message = (
-                        f"*{title}*  "
+                        f"*{title}* "
                         f"{body}"
                     )
                 
