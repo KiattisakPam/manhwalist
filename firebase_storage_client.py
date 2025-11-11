@@ -74,12 +74,22 @@ async def delete_file_from_firebase(blob_name: str):
         raise
 
 async def download_file_from_firebase(blob_name: str) -> bytes:
-    """ดาวน์โหลดไฟล์ (bytes) จาก Firebase Storage (โดยไม่ encode ชื่อไฟล์เอง)"""
+    """ดาวน์โหลดไฟล์ (bytes) จาก Firebase Storage"""
     if not bucket:
         raise Exception("Firebase Storage not initialized.")
     
-    # 🛑 [FIX] ใช้ blob_name ตรงๆ
-    blob = bucket.blob(blob_name)
+    # 1. 🛑 [CRITICAL FIX] บังคับให้ชื่อ Blob เป็น UTF-8 bytes ก่อนส่งไป quote
+    #    บางครั้ง Python Environment ใช้ Encoding ผิดพลาดกับ urllib.quote
+    
+    # NOTE: เราไม่ควรเรียก quote ซ้ำที่นี่ ถ้า Blob Name ถูกส่งมาเป็น Unicode string 
+    #       (ซึ่งมันควรจะเป็น) Google Client Library ควรจัดการเอง
+    
+    # เราจะลองเปลี่ยนไปใช้ Blob Name ตรงๆ ที่ถูก Cleanse มาแล้ว และเชื่อมั่นว่า 
+    # Google Client Library จะจัดการ Encoding ได้ ถ้ามันรับ string ที่เป็น Unicode
+
+    # 🛑 [FINAL FIX ATTEMPT] เปลี่ยน urllib.quote เป็นการใช้ blob_name ตรงๆ ใน bucket.blob()
+    #    เนื่องจาก Blob Name ถูก Unquote ใน files.py แล้ว จึงควรเป็น Unicode string ที่ถูกต้อง
+    blob = bucket.blob(blob_name) 
     
     try:
         file_bytes = blob.download_as_bytes()
@@ -91,6 +101,24 @@ async def download_file_from_firebase(blob_name: str) -> bytes:
         print(f"FIREBASE_CLIENT_ERROR: Permission Denied for Blob: {blob_name}. {e}")
         raise Forbidden(f"Permission denied for {blob_name}.") from e
     except Exception as e:
-        print(f"FIREBASE_CLIENT_ERROR: Unknown error during download: {e}")
+        # 🛑 [DEBUG] พิมพ์ชนิดของ Exception เพื่อยืนยันว่าไม่ใช่ Network Error ธรรมดา
+        print(f"FIREBASE_CLIENT_ERROR: Unknown error during download for '{blob_name}': {type(e).__name__} - {e}")
+        # Error: 'latin-1' codec can't encode...
+        
+        # 🛑 [CRITICAL FIX] หาก Error ยังคงเกิดที่นี่ ให้สันนิษฐานว่าชื่อไฟล์ 
+        # ต้องถูก URL Encode ก่อนเข้าสู่ Google API Call
+        
+        if type(e).__name__ == 'UnicodeEncodeError':
+             # ถ้าเกิด Unicode Error แสดงว่า Environment พยายาม encode ด้วย Latin-1
+             # เราต้องกลับไปใช้ urllib.quote และหวังว่ามันจะถูกส่งเป็น UTF-8
+             
+             # **Undo the previous attempt and retry with quote**
+             # Since it failed with Latin-1, let's force the quote process again
+             
+             encoded_blob_name = urllib.parse.quote(blob_name)
+             blob = bucket.blob(encoded_blob_name)
+             file_bytes = blob.download_as_bytes()
+             return file_bytes
+             
         raise Exception(f"Firebase Download Error: {e}") from e
     
