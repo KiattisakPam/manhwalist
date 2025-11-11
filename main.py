@@ -22,10 +22,10 @@ from routers import (
     chat as chatRouter
 )
 
-# 📌 [FIX] ฟังก์ชันสร้างโฟลเดอร์ (ยังคงจำเป็นสำหรับ Static Files: covers)
+# 📌 ฟังก์ชันสร้างโฟลเดอร์ (ยังคงจำเป็นสำหรับ Static Files: covers)
 def ensure_directories_exist():
     os.makedirs("covers", exist_ok=True)
-    # NOTE: job_files และ chat_files ไม่จำเป็นต้องสร้างถ้าใช้ Firebase 100% แต่ควรมีเผื่อ Static File
+    # NOTE: job_files และ chat_files ไม่จำเป็นต้องสร้างถ้าใช้ Firebase 100% 
     os.makedirs("job_files", exist_ok=True) 
     os.makedirs("chat_files", exist_ok=True)
     print("INFO: Ensured necessary directories exist.")
@@ -46,14 +46,13 @@ app.add_middleware(
 # --- Static Files Configuration ---
 # 📌 [FIX] Static Files (covers) ยังคงต้องใช้
 app.mount("/covers", StaticFiles(directory="covers"), name="covers") 
-# 📌 [FIX] Endpoint Streaming (job-files/chat-files) ถูกตั้งค่าใน files.py/routers
-app.mount("/job-files", filesRouter.router, name="job_files_streaming") 
-app.mount("/chat-files", filesRouter.router, name="chat_files_streaming")
+
+# 🛑 [CRITICAL FIX] ยกเลิก app.mount และใช้ include_router แทน
+# (การใช้ mount กับ router ที่มี Depends ทำให้เกิด 404/403)
 # ----------------------------------
 
 
 # --- Include Routers ---
-# 📌 [FIX] ไม่ต้องรวม filesRouter อีกรอบ เพราะถูก Mount แล้ว
 app.include_router(usersRouter.router)
 app.include_router(comicsRouter.router)
 app.include_router(jobsRouter.router)
@@ -62,6 +61,12 @@ app.include_router(programsRouter.router)
 app.include_router(notificationsRouter.router)
 app.include_router(settingsRouter.router)
 app.include_router(chatRouter.router)
+
+# 🛑 [CRITICAL FIX] ใช้ include_router สำหรับ Files Router
+#    กำหนด Prefix ให้ตรงกับชื่อโฟลเดอร์ใน Firebase (job_files/chat_files)
+#    เพื่อให้ Frontend สามารถเรียกใช้ Path ที่สอดคล้องกันได้
+app.include_router(filesRouter.router, prefix="/job_files")
+app.include_router(filesRouter.router, prefix="/chat_files")
 
 # --- Event Handlers ---
 @app.on_event("startup")
